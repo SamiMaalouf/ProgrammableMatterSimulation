@@ -1,1 +1,0 @@
-"""UI package for programmable matter simulation.""" 

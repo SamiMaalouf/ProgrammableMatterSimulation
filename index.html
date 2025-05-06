@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Programmable Matter Simulation</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Programmable Matter Simulation</h1>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="grid-size">Grid Size:</label>
+                <input type="number" id="grid-size" min="5" max="30" value="10">
+                <button id="apply-grid-size-btn">Apply Size</button>
+            </div>
+            
+            <div class="control-group">
+                <label for="interaction-mode">Mode:</label>
+                <select id="interaction-mode">
+                    <option value="wall">Place Walls</option>
+                    <option value="agent">Place Agents</option>
+                    <option value="target">Place Targets</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="generation-mode">Generation:</label>
+                <select id="generation-mode">
+                    <option value="manual">Manual Placement</option>
+                    <option value="auto">Auto-Generate</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label for="target-shape">Target Shape:</label>
+                <select id="target-shape">
+                    <option value="diamond">Diamond</option>
+                    <option value="triangle">Triangle</option>
+                    <option value="square">Square</option>
+                    <option value="custom">Custom</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="action-buttons">
+            <button id="initialize-btn">Initialize Grid</button>
+            <button id="start-btn">Start Simulation</button>
+            <button id="reset-btn">Reset</button>
+            <button id="clear-agents-btn">Clear Agents</button>
+            <button id="clear-targets-btn">Clear Targets</button>
+            <button id="clear-walls-btn">Clear Walls</button>
+            <button id="clear-log-btn">Clear Log</button>
+        </div>
+        
+        <div class="main-container">
+            <div class="simulation-container">
+                <div class="grid-container" id="grid-container"></div>
+                
+                <div class="stats-container">
+                    <div class="stat">
+                        <span class="stat-label">Total Moves:</span>
+                        <span class="stat-value" id="total-moves">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Deadlocks Resolved:</span>
+                        <span class="stat-value" id="deadlocks-resolved">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Agents Count:</span>
+                        <span class="stat-value" id="agents-count">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Targets Count:</span>
+                        <span class="stat-value" id="targets-count">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Current Mode:</span>
+                        <span class="stat-value" id="current-mode">Wall</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="log-container">
+                <h3>Simulation Log</h3>
+                <div id="log-console"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="astar.js"></script>
+    <script src="assignmentAlgorithm.js"></script>
+    <script src="deadlockHandler.js"></script>
+    <script src="main.js"></script>
+</body>
+</html> 

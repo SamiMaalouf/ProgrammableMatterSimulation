@@ -1,0 +1,261 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+    background-color: #f5f5f5;
+    color: #333;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 20px auto;
+    padding: 20px;
+    background-color: #fff;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+    text-align: center;
+    margin-bottom: 20px;
+    color: #2c3e50;
+}
+
+h3 {
+    margin-bottom: 10px;
+    color: #2c3e50;
+}
+
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin-bottom: 10px;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+}
+
+.action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding: 10px 15px;
+    background-color: #e9ecef;
+    border-radius: 5px;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+input, select {
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+input[type="number"] {
+    width: 60px;
+}
+
+button {
+    padding: 8px 16px;
+    background-color: #3498db;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+button:hover {
+    background-color: #2980b9;
+}
+
+button:disabled {
+    background-color: #95a5a6;
+    cursor: not-allowed;
+}
+
+.main-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.simulation-container {
+    display: flex;
+    gap: 20px;
+}
+
+.grid-container {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 1px;
+    background-color: #eee;
+    border: 1px solid #ddd;
+    aspect-ratio: 1;
+}
+
+.cell {
+    background-color: white;
+    border: 1px solid #ddd;
+    aspect-ratio: 1;
+    position: relative;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.cell:hover {
+    border: 1px solid #3498db;
+}
+
+.cell.mode-wall:hover {
+    background-color: rgba(127, 140, 141, 0.3);
+}
+
+.cell.mode-agent:hover {
+    background-color: rgba(243, 156, 18, 0.3);
+}
+
+.cell.mode-target:hover {
+    background-color: rgba(46, 204, 113, 0.3);
+}
+
+.cell.active {
+    background-color: #f39c12;
+}
+
+.cell.target {
+    background-color: #2ecc71;
+    opacity: 0.5;
+}
+
+.cell.active.target {
+    background-color: #f39c12;
+    border: 2px solid #2ecc71;
+}
+
+.cell.path {
+    background-color: #3498db;
+    opacity: 0.2;
+}
+
+.cell.wall {
+    background-color: #7f8c8d;
+}
+
+.stats-container {
+    width: 200px;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+}
+
+.stat {
+    margin-bottom: 10px;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 5px;
+}
+
+.stat-label {
+    font-weight: bold;
+    margin-right: 5px;
+}
+
+.log-container {
+    background-color: #f8f9fa;
+    border-radius: 5px;
+    padding: 10px;
+    height: 300px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+}
+
+#log-console {
+    font-family: monospace;
+    font-size: 14px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.log-entry {
+    margin-bottom: 5px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #eee;
+}
+
+.log-info {
+    color: #2980b9;
+}
+
+.log-warn {
+    color: #f39c12;
+}
+
+.log-error {
+    color: #e74c3c;
+}
+
+.log-success {
+    color: #27ae60;
+}
+
+/* Mode specific buttons */
+#clear-agents-btn {
+    background-color: #f39c12;
+}
+
+#clear-agents-btn:hover {
+    background-color: #d35400;
+}
+
+#clear-targets-btn {
+    background-color: #2ecc71;
+}
+
+#clear-targets-btn:hover {
+    background-color: #27ae60;
+}
+
+#clear-walls-btn {
+    background-color: #7f8c8d;
+}
+
+#clear-walls-btn:hover {
+    background-color: #34495e;
+}
+
+#initialize-btn {
+    background-color: #9b59b6;
+}
+
+#initialize-btn:hover {
+    background-color: #8e44ad;
+}
+
+@media (min-width: 1024px) {
+    .main-container {
+        flex-direction: row;
+    }
+    
+    .simulation-container {
+        flex: 3;
+    }
+    
+    .log-container {
+        flex: 2;
+        height: auto;
+        max-height: 600px;
+    }
+} 

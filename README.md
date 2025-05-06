@@ -1,72 +1,67 @@
 # Programmable Matter Simulation
 
-A simulation of programmable matter agents navigating a 2D grid to form target shapes. This project implements a state-space search problem where agents need to move to specific positions to form predefined shapes.
+This project simulates programmable matter using a state-space search agent modeling a two-dimensional programmable matter board. The simulation demonstrates how autonomous agents can collaborate to form predetermined target shapes.
 
 ## Features
 
-- Dynamic grid size configuration (5x5 to 20x20)
-- Place agents, targets, and walls dynamically on the grid
-- Multiple topology options (Von Neumann, Moore)
-- Multiple decision-making approaches (Centralized, Distributed)
-- Multiple movement types (Sequential, Parallel, Asynchronous)
-- Multiple pathfinding algorithms (BFS, A*, Greedy)
-- Multiple agent-target assignment strategies (Hungarian, Greedy, Auction)
-- Deadlock prevention to avoid infinite loops and collisions
-- Predefined shapes (Square, Diamond, Triangle, Line)
-- Interactive UI with real-time simulation
+- **Von Neumann Topology**: 4-directional movement (up, down, left, right)
+- **A* Pathfinding**: Optimal pathfinding for agents to reach target positions
+- **Hungarian Algorithm**: Optimal assignment of agents to target positions
+- **Deadlock Detection and Resolution**: Detection and handling of deadlocks when agents block each other
+- **Interactive UI**: Configurable grid size and target shapes
+- **Dynamic Placement**: Manually place agents, targets, and walls for custom scenarios
 
-## Requirements
-
-- Python 3.7+
-- Pygame
-- NumPy
-
-## Installation
+## Getting Started
 
 1. Clone this repository
-2. Install the required packages:
+2. Open `index.html` in a modern web browser
+3. Configure the grid size (5-30) and click "Apply Size"
+4. Choose between manual placement or auto-generation
+5. Place agents and targets on the grid manually or select a predefined shape
+6. Click "Initialize Grid" to set up the simulation
+7. Click "Start Simulation" to begin
 
-```bash
-pip install -r requirements.txt
-```
+## Usage
 
-## Running the Simulation
+### Grid Setup
+- **Grid Size**: Set the grid dimensions (5-30) and click "Apply Size"
+- **Mode Selection**: Choose between Wall, Agent, or Target placement mode
+- **Generation Mode**: Choose between Manual Placement or Auto-Generate
+- **Target Shape**: Select Diamond, Triangle, Square, or Custom shape
 
-Run the main script:
+### Interaction Modes
+- **Wall Mode**: Click on cells to place or remove walls
+- **Agent Mode**: Click on cells to place or remove agents
+- **Target Mode**: Click on cells to place or remove target positions
 
-```bash
-python main.py
-```
+### Controls
+- **Initialize Grid**: Sets up the grid with the specified size and configuration
+- **Start/Pause**: Toggle simulation execution
+- **Reset**: Reset the simulation to its initial state
+- **Clear Agents/Targets/Walls**: Remove all objects of the specified type
+- **Clear Log**: Clear the simulation log
 
-## How to Use
+## Advanced Features
+- **Custom Scenarios**: Create complex scenarios by manually placing agents and targets
+- **Multiple Pathfinding Approaches**: The system uses various fallback strategies when paths are blocked
+- **Deadlock Resolution**: Multiple techniques are used to resolve deadlocks, including:
+  - Alternative path finding
+  - Temporary retreats
+  - Agent position swapping
+  - Random moves as a last resort
 
-1. **Grid Configuration**:
-   - Use the "Grid Size" slider to adjust the grid dimensions
-   - Choose a topology (Von Neumann for 4-connectivity, Moore for 8-connectivity)
+## How It Works
 
-2. **Place Elements**:
-   - Select a tool (Agent, Target, Wall, Empty) and click on the grid to place elements
-   - Use the shape buttons to place predefined target shapes on the grid
+1. Agents are placed manually or at predefined positions
+2. Target positions form a shape (diamond, triangle, square) or are placed manually
+3. The Hungarian algorithm determines the optimal agent-to-target assignments
+4. A* pathfinding calculates the optimal path for each agent to reach its target
+5. Agents move one step at a time along their paths
+6. The deadlock handler detects and resolves situations where agents block each other
 
-3. **Configure Simulation**:
-   - Select a pathfinding algorithm (BFS, A*, Greedy)
-   - Select an agent-target assignment strategy (Hungarian, Greedy, Auction)
-   - Select a decision-making approach (Centralized, Distributed)
-   - Select a movement type (Sequential, Parallel, Asynchronous)
-   - Adjust simulation speed using the slider
+## Implementation Details
 
-4. **Run Simulation**:
-   - Click "Start Simulation" to begin the simulation
-   - Click "Stop Simulation" to pause
-   - Click "Reset" to clear paths and restart
-
-## Project Details
-
-This project simulates programmable matter agents moving through a grid to form specific shapes. It includes:
-
-- Pathfinding algorithms for movement planning
-- Agent-target assignment strategies
-- Deadlock detection and prevention
-- Multiple movement coordination strategies
-
-The project follows the specifications described in the course project, implementing both the basic state-space search (Project 1) and the extended multi-agent system with various decision-making and movement strategies (Project 2). 
+- **Centralized Decision Making**: A central controller assigns targets and calculates paths
+- **Sequential Movements**: Agents move one by one to avoid collisions
+- **Deadlock Prevention**: The simulation includes mechanisms to detect and resolve deadlocks
+- **Performance Tracking**: The UI displays the total number of moves and deadlocks resolved 
