@@ -124,8 +124,8 @@ function clearLog() {
  */
 function applyGridSize() {
     const newSize = parseInt(gridSizeInput.value, 10);
-    if (newSize < 5 || newSize > 30) {
-        log(`Invalid grid size. Please enter a value between 5 and 30.`, 'error');
+    if (newSize < 5 || newSize > 50) {
+        log(`Invalid grid size. Please enter a value between 5 and 50.`, 'error');
         return;
     }
     
