@@ -911,6 +911,477 @@ function findTemporaryTarget(agent) {
 }
 
 /**
+ * Try to resolve deadlock by reassigning targets
+ * @returns {boolean} - Whether a reassignment was successful
+ */
+function tryTargetReassignment() {
+    log('Attempting to resolve deadlock by reassigning targets...', 'warn');
+    
+    // Find agents that haven't reached their targets
+    const agentsNotAtTarget = agents.filter(agent => 
+        agent.x !== agent.targetX || agent.y !== agent.targetY
+    );
+    
+    // Find agents that have reached their targets
+    const agentsAtTarget = agents.filter(agent => 
+        agent.x === agent.targetX && agent.y === agent.targetY
+    );
+    
+    // Find empty targets (targets not assigned to any agent)
+    const emptyTargets = [];
+    
+    // Consider all possible target reassignments
+    for (const agent of agentsAtTarget) {
+        // First try to move a blocking agent to another target
+        const otherTargets = targetPositions.filter(pos => 
+            !(pos.x === agent.x && pos.y === agent.y) && // Not this agent's current target
+            !agents.some(a => a.x === pos.x && a.y === pos.y) // Not occupied by another agent
+        );
+        
+        if (otherTargets.length > 0) {
+            // Try each other target to see if it improves the situation
+            for (const target of otherTargets) {
+                // Check if the new target position is reachable
+                const clearedGrid = [];
+                for (let y = 0; y < grid.length; y++) {
+                    clearedGrid.push([]);
+                    for (let x = 0; x < grid[y].length; x++) {
+                        // Only keep walls and other agents at targets
+                        if (grid[y][x] === CELL_WALL) {
+                            clearedGrid[y][x] = CELL_WALL;
+                        } else {
+                            // Mark as empty unless it's another agent at target
+                            const agentAtPos = agents.find(a => 
+                                a.id !== agent.id && a.x === x && a.y === y && 
+                                a.x === a.targetX && a.y === a.targetY
+                            );
+                            clearedGrid[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
+                        }
+                    }
+                }
+                
+                // Check if this target is reachable for the agent
+                const astar = new AStar(clearedGrid);
+                const path = astar.findPath(
+                    { x: agent.x, y: agent.y },
+                    { x: target.x, y: target.y }
+                );
+                
+                if (path.length > 1) {
+                    // This target is reachable, reassign it
+                    log(`Reassigning agent ${agent.id} from target (${agent.targetX}, ${agent.targetY}) to target (${target.x}, ${target.y})`, 'success');
+                    
+                    // Update agent's target
+                    agent.targetX = target.x;
+                    agent.targetY = target.y;
+                    agent.path = path;
+                    
+                    // Now check if other agents can find paths to their targets
+                    for (const blockedAgent of agentsNotAtTarget) {
+                        calculatePath(blockedAgent);
+                    }
+                    
+                    return true;
+                }
+            }
+        }
+    }
+    
+    // If moving agents at targets doesn't work, try reassigning a blocked agent to another target
+    for (const blockedAgent of agentsNotAtTarget) {
+        const otherTargets = targetPositions.filter(pos => 
+            !(pos.x === blockedAgent.targetX && pos.y === blockedAgent.targetY) && // Not this agent's current target
+            !agents.some(a => a.x === pos.x && a.y === pos.y) // Not occupied by another agent
+        );
+        
+        if (otherTargets.length > 0) {
+            // Find the closest alternative target
+            otherTargets.sort((a, b) => {
+                const distA = Math.abs(blockedAgent.x - a.x) + Math.abs(blockedAgent.y - a.y);
+                const distB = Math.abs(blockedAgent.x - b.x) + Math.abs(blockedAgent.y - b.y);
+                return distA - distB;
+            });
+            
+            // Try to find a path to the closest alternative target
+            for (const target of otherTargets) {
+                const clearedGrid = [];
+                for (let y = 0; y < grid.length; y++) {
+                    clearedGrid.push([]);
+                    for (let x = 0; x < grid[y].length; x++) {
+                        // Only keep walls and agents at targets
+                        if (grid[y][x] === CELL_WALL) {
+                            clearedGrid[y][x] = CELL_WALL;
+                        } else {
+                            const agentAtPos = agents.find(a => 
+                                a.id !== blockedAgent.id && a.x === x && a.y === y &&
+                                a.x === a.targetX && a.y === a.targetY
+                            );
+                            clearedGrid[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
+                        }
+                    }
+                }
+                
+                const astar = new AStar(clearedGrid);
+                const path = astar.findPath(
+                    { x: blockedAgent.x, y: blockedAgent.y },
+                    { x: target.x, y: target.y }
+                );
+                
+                if (path.length > 1) {
+                    // This target is reachable, reassign it
+                    log(`Reassigning blocked agent ${blockedAgent.id} from target (${blockedAgent.targetX}, ${blockedAgent.targetY}) to target (${target.x}, ${target.y})`, 'success');
+                    
+                    // Update agent's target
+                    blockedAgent.targetX = target.x;
+                    blockedAgent.targetY = target.y;
+                    blockedAgent.path = path;
+                    return true;
+                }
+            }
+        }
+    }
+    
+    log('Could not find any viable target reassignments', 'error');
+    return false;
+}
+
+/**
+ * Try to swap positions between agents to resolve deadlocks
+ * @param {Array} stuckAgents - List of agents that are deadlocked
+ * @returns {boolean} - Whether a swap was successful
+ */
+function tryAgentSwapping(stuckAgents) {
+    log('Attempting to swap positions between deadlocked agents', 'warn');
+    
+    // Try pairwise swaps for deadlocked agents
+    for (let i = 0; i < stuckAgents.length - 1; i++) {
+        for (let j = i + 1; j < stuckAgents.length; j++) {
+            const agent1 = stuckAgents[i];
+            const agent2 = stuckAgents[j];
+            
+            // Check if swapping helps them get closer to their targets
+            const distA1 = Math.abs(agent1.x - agent1.targetX) + Math.abs(agent1.y - agent1.targetY);
+            const distB1 = Math.abs(agent2.x - agent2.targetX) + Math.abs(agent2.y - agent2.targetY);
+            
+            // Calculate distances if positions are swapped
+            const distA2 = Math.abs(agent2.x - agent1.targetX) + Math.abs(agent2.y - agent1.targetY);
+            const distB2 = Math.abs(agent1.x - agent2.targetX) + Math.abs(agent1.y - agent2.targetY);
+            
+            // If swapping reduces total distance
+            if (distA2 + distB2 < distA1 + distB1) {
+                log(`Swapping agents ${agent1.id} and ${agent2.id} to resolve deadlock`, 'success');
+                
+                // Swap positions
+                const tempX = agent1.x;
+                const tempY = agent1.y;
+                
+                // Update grid
+                grid[agent1.y][agent1.x] = CELL_EMPTY;
+                grid[agent2.y][agent2.x] = CELL_EMPTY;
+                
+                agent1.x = agent2.x;
+                agent1.y = agent2.y;
+                agent2.x = tempX;
+                agent2.y = tempY;
+                
+                grid[agent1.y][agent1.x] = CELL_AGENT;
+                grid[agent2.y][agent2.x] = CELL_AGENT;
+                
+                // Recalculate paths
+                calculatePath(agent1);
+                calculatePath(agent2);
+                
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Try random moves for stuck agents as a last resort
+ * @param {Array} stuckAgents - List of agents that are deadlocked
+ * @returns {boolean} - Whether any random move was successful
+ */
+function tryRandomMoves(stuckAgents) {
+    log('Attempting random moves for deadlocked agents as last resort', 'warn');
+    
+    let madeRandomMove = false;
+    
+    for (const agent of stuckAgents) {
+        // Try random direction
+        const directions = [
+            { dx: 0, dy: -1 }, // Up
+            { dx: 1, dy: 0 },  // Right
+            { dx: 0, dy: 1 },  // Down
+            { dx: -1, dy: 0 }  // Left
+        ];
+        
+        // Shuffle directions
+        directions.sort(() => Math.random() - 0.5);
+        
+        for (const dir of directions) {
+            const nx = agent.x + dir.dx;
+            const ny = agent.y + dir.dy;
+            
+            // Check if position is valid
+            if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) {
+                // Check if cell is empty and no other agent is there
+                const isEmpty = grid[ny][nx] !== CELL_WALL;
+                const isOccupied = agents.some(a => a.id !== agent.id && a.x === nx && a.y === ny);
+                
+                if (isEmpty && !isOccupied) {
+                    log(`Random move for agent ${agent.id} from (${agent.x}, ${agent.y}) to (${nx}, ${ny})`, 'warn');
+                    
+                    // Update grid
+                    grid[agent.y][agent.x] = CELL_EMPTY;
+                    agent.x = nx;
+                    agent.y = ny;
+                    grid[agent.y][agent.x] = CELL_AGENT;
+                    
+                    // Clear path to force recalculation
+                    agent.path = [];
+                    calculatePath(agent);
+                    
+                    madeRandomMove = true;
+                    break;
+                }
+            }
+        }
+        
+        if (madeRandomMove) break;
+    }
+    
+    return madeRandomMove;
+}
+
+/**
+ * Try to move all agents at targets that might be blocking others
+ * More aggressive than the regular check, used as a last resort
+ * @returns {boolean} - Whether any agent was moved
+ */
+function tryMoveBlockingAgents() {
+    log('Attempting to move agents at targets that are blocking others', 'warn');
+    
+    let anyAgentMoved = false;
+    
+    // Find all agents at their targets
+    const agentsAtTargets = agents.filter(a => a.x === a.targetX && a.y === a.targetY);
+    
+    // Find all agents not at their targets
+    const agentsNotAtTargets = agents.filter(a => a.x !== a.targetX || a.y !== a.targetY);
+    
+    // Check if any agent at target is blocking a path for agents not at targets
+    for (const targetAgent of agentsAtTargets) {
+        // Check if this agent's position is in the path of any agent not at target
+        const isBlocking = agentsNotAtTargets.some(a => 
+            a.path && a.path.length > 1 && 
+            a.path.some(pos => pos.x === targetAgent.x && pos.y === targetAgent.y)
+        );
+        
+        if (isBlocking) {
+            log(`Agent ${targetAgent.id} at target (${targetAgent.x}, ${targetAgent.y}) is blocking other agents' paths`, 'warn');
+            
+            // Try to move this agent temporarily
+            if (moveAgentTemporarilyForced(targetAgent)) {
+                // Recalculate paths for all agents not at targets
+                agentsNotAtTargets.forEach(agent => calculatePath(agent));
+                anyAgentMoved = true;
+            }
+        }
+    }
+    
+    return anyAgentMoved;
+}
+
+/**
+ * More aggressive version of moving an agent at its target to another position
+ * to resolve deadlocks. This will attempt to move the agent further away if needed.
+ * @param {Object} agent - The agent to move
+ * @returns {boolean} - Whether the agent was moved successfully
+ */
+function moveAgentTemporarilyForced(agent) {
+    // Only move agents that are at their targets
+    if (agent.x !== agent.targetX || agent.y !== agent.targetY) {
+        return false;
+    }
+    
+    log(`Forcefully moving agent ${agent.id} from its target at (${agent.x}, ${agent.y})`, 'warn');
+    
+    // Try an expanded search for temporary positions
+    const availablePositions = [];
+    
+    // Check all positions within radius 3
+    for (let dy = -3; dy <= 3; dy++) {
+        for (let dx = -3; dx <= 3; dx++) {
+            // Skip current position
+            if (dx === 0 && dy === 0) {
+                continue;
+            }
+            
+            const nx = agent.x + dx;
+            const ny = agent.y + dy;
+            
+            // Check if position is valid
+            if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) {
+                // Check if position is empty or not a wall
+                if (grid[ny][nx] !== CELL_WALL) {
+                    // Check if no other agent is there
+                    const isOccupied = agents.some(a => a.id !== agent.id && a.x === nx && a.y === ny);
+                    
+                    if (!isOccupied) {
+                        // Calculate Manhattan distance to target
+                        const distToTarget = Math.abs(nx - agent.targetX) + Math.abs(ny - agent.targetY);
+                        availablePositions.push({ x: nx, y: ny, dist: distToTarget });
+                    }
+                }
+            }
+        }
+    }
+    
+    if (availablePositions.length > 0) {
+        // Sort by distance to target (closest first)
+        availablePositions.sort((a, b) => a.dist - b.dist);
+        
+        const tempPos = availablePositions[0];
+        
+        log(`Force-moving agent ${agent.id} from (${agent.x}, ${agent.y}) to (${tempPos.x}, ${tempPos.y})`, 'success');
+        
+        // Set flag for return to target later
+        agent.needsToReturnToTarget = true;
+        agent.originalTarget = { x: agent.targetX, y: agent.targetY };
+        
+        // Move agent
+        grid[agent.y][agent.x] = CELL_EMPTY;
+        agent.x = tempPos.x;
+        agent.y = tempPos.y;
+        grid[agent.y][agent.x] = CELL_AGENT;
+        
+        // Create path to return later
+        agent.path = [
+            { x: agent.x, y: agent.y },
+            { x: agent.originalTarget.x, y: agent.originalTarget.y }
+        ];
+        
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * Find a two-phase path that goes around other agents to reach the target
+ * First phase: find a path to an intermediate position away from other agents
+ * Second phase: find a path from that position to the target
+ * @param {Object} agent - The agent to find a path for
+ * @returns {boolean} - Whether a path was found
+ */
+function findTwoPhasePathThroughAgents(agent) {
+    log(`Trying to find a two-phase path for agent ${agent.id} to target (${agent.targetX}, ${agent.targetY})`, 'info');
+    
+    // First, find all potential intermediate positions
+    const potentialIntermediates = [];
+    
+    // Look for open spaces that are not close to other agents at their targets
+    for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+            // Skip walls and positions occupied by agents
+            if (grid[y][x] !== CELL_EMPTY) {
+                continue;
+            }
+            
+            // Check if position is close to any agent at its target
+            const isCloseToAgentAtTarget = agents.some(a => 
+                a.id !== agent.id && 
+                a.x === a.targetX && a.y === a.targetY && 
+                Math.abs(x - a.x) + Math.abs(y - a.y) <= 2
+            );
+            
+            if (!isCloseToAgentAtTarget) {
+                // Calculate distances to agent and target
+                const distToAgent = Math.abs(x - agent.x) + Math.abs(y - agent.y);
+                const distToTarget = Math.abs(x - agent.targetX) + Math.abs(y - agent.targetY);
+                
+                // Score the intermediate position
+                // We want positions that make progress toward the target
+                const score = distToAgent + distToTarget * 1.5;
+                
+                potentialIntermediates.push({ x, y, score });
+            }
+        }
+    }
+    
+    // Sort intermediates by score (lower is better)
+    potentialIntermediates.sort((a, b) => a.score - b.score);
+    
+    // Try each intermediate position
+    for (const intermediate of potentialIntermediates.slice(0, 5)) { // Try top 5 positions
+        // Create a grid where agents at targets are marked as walls
+        const phaseOneGrid = [];
+        for (let y = 0; y < grid.length; y++) {
+            phaseOneGrid.push([]);
+            for (let x = 0; x < grid[y].length; x++) {
+                // Keep walls
+                if (grid[y][x] === CELL_WALL) {
+                    phaseOneGrid[y][x] = CELL_WALL;
+                } 
+                // Mark agents at targets as walls
+                else {
+                    const agentAtPos = agents.find(a => 
+                        a.id !== agent.id && a.x === x && a.y === y && 
+                        a.x === a.targetX && a.y === a.targetY
+                    );
+                    phaseOneGrid[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
+                }
+            }
+        }
+        
+        // Phase 1: Find path to intermediate position
+        const astar1 = new AStar(phaseOneGrid);
+        const pathToIntermediate = astar1.findPath(
+            { x: agent.x, y: agent.y },
+            { x: intermediate.x, y: intermediate.y }
+        );
+        
+        if (pathToIntermediate.length > 1) {
+            // Phase 2: Check if there's a path from intermediate to target
+            // Use a clearer grid for this since we're now away from blocking agents
+            const phaseTwoGrid = [];
+            for (let y = 0; y < grid.length; y++) {
+                phaseTwoGrid.push([]);
+                for (let x = 0; x < grid[y].length; x++) {
+                    // Only keep walls, clear everything else
+                    phaseTwoGrid[y][x] = grid[y][x] === CELL_WALL ? CELL_WALL : CELL_EMPTY;
+                }
+            }
+            
+            const astar2 = new AStar(phaseTwoGrid);
+            const pathToTarget = astar2.findPath(
+                { x: intermediate.x, y: intermediate.y },
+                { x: agent.targetX, y: agent.targetY }
+            );
+            
+            if (pathToTarget.length > 1) {
+                // We found a valid two-phase path!
+                log(`Found two-phase path for agent ${agent.id} through intermediate (${intermediate.x}, ${intermediate.y})`, 'success');
+                
+                // Only use the first phase for now
+                agent.path = pathToIntermediate;
+                
+                // Set the flag to recalculate path when intermediate is reached
+                agent.needsRecalculation = true;
+                
+                return true;
+            }
+        }
+    }
+    
+    log(`Failed to find two-phase path for agent ${agent.id}`, 'warn');
+    return false;
+}
+
+/**
  * Perform one step of the simulation
  */
 function simulationStep() {
@@ -1054,6 +1525,11 @@ function simulationStep() {
         if (!agentsMoved) {
             log('No agents moved in this step', 'warn');
             
+            // Try one last attempt to move agents at targets that might be blocking others
+            if (tryMoveBlockingAgents()) {
+                return; // Continue simulation if successful
+            }
+            
             // If some agents have no valid moves and the deadlock resolution failed,
             // try stronger intervention
             if (agentsWithNoMoves > 0) {
@@ -1067,58 +1543,38 @@ function simulationStep() {
                 
                 let interventionSuccessful = false;
                 
-                // Swap positions between agents if possible
-                if (stuckAgents.length >= 2) {
-                    // Try pairwise swaps for deadlocked agents
-                    for (let i = 0; i < stuckAgents.length - 1; i++) {
-                        for (let j = i + 1; j < stuckAgents.length; j++) {
-                            const agent1 = stuckAgents[i];
-                            const agent2 = stuckAgents[j];
-                            
-                            // Check if swapping helps them get closer to their targets
-                            const distA1 = Math.abs(agent1.x - agent1.targetX) + Math.abs(agent1.y - agent1.targetY);
-                            const distB1 = Math.abs(agent2.x - agent2.targetX) + Math.abs(agent2.y - agent2.targetY);
-                            
-                            // Calculate distances if positions are swapped
-                            const distA2 = Math.abs(agent2.x - agent1.targetX) + Math.abs(agent2.y - agent1.targetY);
-                            const distB2 = Math.abs(agent1.x - agent2.targetX) + Math.abs(agent1.y - agent2.targetY);
-                            
-                            // If swapping reduces total distance
-                            if (distA2 + distB2 < distA1 + distB1) {
-                                log(`Swapping agents ${agent1.id} and ${agent2.id} to resolve deadlock`, 'success');
-                                
-                                // Swap positions
-                                const tempX = agent1.x;
-                                const tempY = agent1.y;
-                                
-                                // Update grid
-                                grid[agent1.y][agent1.x] = CELL_EMPTY;
-                                grid[agent2.y][agent2.x] = CELL_EMPTY;
-                                
-                                agent1.x = agent2.x;
-                                agent1.y = agent2.y;
-                                agent2.x = tempX;
-                                agent2.y = tempY;
-                                
-                                grid[agent1.y][agent1.x] = CELL_AGENT;
-                                grid[agent2.y][agent2.x] = CELL_AGENT;
-                                
-                                // Recalculate paths
-                                calculatePath(agent1);
-                                calculatePath(agent2);
-                                
+                // Try to move agents at targets temporarily if they're blocking others
+                if (!interventionSuccessful) {
+                    for (const stuckAgent of stuckAgents) {
+                        // Find any agent at its target that might be blocking
+                        const blockingAgents = agents.filter(a => 
+                            a.x === a.targetX && 
+                            a.y === a.targetY &&
+                            Math.abs(a.x - stuckAgent.targetX) + Math.abs(a.y - stuckAgent.targetY) <= 2
+                        );
+                        
+                        for (const blockingAgent of blockingAgents) {
+                            // Attempt a more aggressive temporary move
+                            if (moveAgentTemporarilyForced(blockingAgent)) {
+                                calculatePath(stuckAgent);
                                 interventionSuccessful = true;
                                 break;
                             }
                         }
+                        
                         if (interventionSuccessful) break;
                     }
+                }
+                
+                // Swap positions between agents if possible
+                if (!interventionSuccessful && stuckAgents.length >= 2) {
+                    interventionSuccessful = tryAgentSwapping(stuckAgents);
                 }
                 
                 // If swapping didn't work, try completely cleared paths
                 if (!interventionSuccessful) {
                     for (const agent of stuckAgents) {
-                        if (findPathIgnoringAgents(agent)) {
+                        if (findTwoPhasePathThroughAgents(agent) || findPathIgnoringAgents(agent)) {
                             interventionSuccessful = true;
                         }
                     }
@@ -1129,56 +1585,16 @@ function simulationStep() {
                     return;
                 }
                 
-                // If we still can't find paths, try one more desperate measure - random movements
+                // If we still can't find paths, try random moves
                 if (!interventionSuccessful) {
-                    let madeRandomMove = false;
-                    
-                    for (const agent of stuckAgents) {
-                        // Try random direction
-                        const directions = [
-                            { dx: 0, dy: -1 }, // Up
-                            { dx: 1, dy: 0 },  // Right
-                            { dx: 0, dy: 1 },  // Down
-                            { dx: -1, dy: 0 }  // Left
-                        ];
-                        
-                        // Shuffle directions
-                        directions.sort(() => Math.random() - 0.5);
-                        
-                        for (const dir of directions) {
-                            const nx = agent.x + dir.dx;
-                            const ny = agent.y + dir.dy;
-                            
-                            // Check if position is valid
-                            if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) {
-                                // Check if cell is empty and no other agent is there
-                                const isEmpty = grid[ny][nx] !== CELL_WALL;
-                                const isOccupied = agents.some(a => a.id !== agent.id && a.x === nx && a.y === ny);
-                                
-                                if (isEmpty && !isOccupied) {
-                                    log(`Random move for agent ${agent.id} to (${nx}, ${ny})`, 'warn');
-                                    
-                                    // Update grid
-                                    grid[agent.y][agent.x] = CELL_EMPTY;
-                                    agent.x = nx;
-                                    agent.y = ny;
-                                    grid[agent.y][agent.x] = CELL_AGENT;
-                                    
-                                    // Clear path to force recalculation
-                                    agent.path = [];
-                                    
-                                    madeRandomMove = true;
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (madeRandomMove) break;
-                    }
-                    
-                    if (madeRandomMove) {
-                        return;
-                    }
+                    interventionSuccessful = tryRandomMoves(stuckAgents);
+                    if (interventionSuccessful) return;
+                }
+                
+                // Try to reassign targets as a last resort
+                if (!interventionSuccessful) {
+                    interventionSuccessful = tryTargetReassignment();
+                    if (interventionSuccessful) return;
                 }
                 
                 // If all intervention attempts failed
@@ -1186,6 +1602,12 @@ function simulationStep() {
                 alert('Simulation stopped: Some agents cannot reach their targets');
             } else {
                 log('Simulation stopped: No more possible moves', 'warn');
+                
+                // Try target reassignment before giving up
+                if (tryTargetReassignment()) {
+                    return;
+                }
+                
                 alert('Simulation stopped: No more possible moves');
             }
             
@@ -1201,7 +1623,7 @@ function simulationStep() {
 
 // Initialize grid on page load
 window.addEventListener('load', () => {
-    log('Programmable Matter Simulation loaded', 'info');
-    changeInteractionMode(); // Set initial mode display
-    initializeGrid();
-}); 
+     log('Programmable Matter Simulation loaded', 'info');
+     changeInteractionMode(); // Set initial mode display
+     initializeGrid();
+});
