@@ -51,6 +51,14 @@
                     <option value="bfs">BFS Algorithm</option>
                 </select>
             </div>
+
+            <div class="control-group">
+                <label for="topology-select">Topology:</label>
+                <select id="topology-select">
+                    <option value="vonNeumann">Von Neumann (4-way)</option>
+                    <option value="moore">Moore (8-way)</option>
+                </select>
+            </div>
         </div>
         
         <div class="action-buttons">
@@ -92,6 +100,10 @@
                         <span class="stat-label">Algorithm:</span>
                         <span class="stat-value" id="current-algorithm">A*</span>
                     </div>
+                    <div class="stat">
+                        <span class="stat-label">Topology:</span>
+                        <span class="stat-value" id="current-topology">Von Neumann</span>
+                    </div>
                 </div>
             </div>
             
@@ -102,6 +114,7 @@
         </div>
     </div>
     
+    <script src="topology.js"></script>
     <script src="astar.js"></script>
     <script src="bfs.js"></script>
     <script src="assignmentAlgorithm.js"></script>

@@ -58,6 +58,7 @@ let failedDeadlockResolutionAttempts = 0; // Track failed deadlock resolution at
 let sequentialMovementMode = false; // Flag for sequential movement mode
 let sequentialMovesRemaining = 0; // Counter for sequential moves
 let currentAlgorithm = 'astar'; // Algorithm selection: 'astar' or 'bfs'
+let currentTopology = TOPOLOGY_VON_NEUMANN; // Topology selection: 'vonNeumann' or 'moore'
 
 // DOM elements
 const gridContainer = document.getElementById('grid-container');
@@ -67,6 +68,7 @@ const interactionModeSelect = document.getElementById('interaction-mode');
 const generationModeSelect = document.getElementById('generation-mode');
 const targetShapeSelect = document.getElementById('target-shape');
 const algorithmSelect = document.getElementById('algorithm-select');
+const topologySelect = document.getElementById('topology-select');
 const initializeBtn = document.getElementById('initialize-btn');
 const startBtn = document.getElementById('start-btn');
 const resetBtn = document.getElementById('reset-btn');
@@ -80,6 +82,7 @@ const agentsCountDisplay = document.getElementById('agents-count');
 const targetsCountDisplay = document.getElementById('targets-count');
 const currentModeDisplay = document.getElementById('current-mode');
 const currentAlgorithmDisplay = document.getElementById('current-algorithm');
+const currentTopologyDisplay = document.getElementById('current-topology');
 const logConsole = document.getElementById('log-console');
 
 // Event listeners
@@ -95,6 +98,7 @@ interactionModeSelect.addEventListener('change', changeInteractionMode);
 generationModeSelect.addEventListener('change', changeGenerationMode);
 targetShapeSelect.addEventListener('change', handleTargetShapeChange);
 algorithmSelect.addEventListener('change', changeAlgorithm);
+topologySelect.addEventListener('change', changeTopology);
 
 /**
  * Log a message to the console with optional type (info, warn, error, success)
@@ -737,15 +741,25 @@ function changeAlgorithm() {
 }
 
 /**
+ * Change the movement topology
+ */
+function changeTopology() {
+    currentTopology = topologySelect.value;
+    let topologyName = currentTopology === TOPOLOGY_VON_NEUMANN ? 'Von Neumann' : 'Moore';
+    currentTopologyDisplay.textContent = topologyName;
+    log(`Movement topology changed to: ${topologyName}`, 'info');
+}
+
+/**
  * Create a pathfinding algorithm instance
  * @param {Array} gridData - The grid data for pathfinding
  * @returns {Object} - An instance of the selected pathfinding algorithm
  */
 function createPathfinder(gridData) {
     if (currentAlgorithm === 'bfs') {
-        return new BFS(gridData);
+        return new BFS(gridData, currentTopology);
     } else {
-        return new AStar(gridData);
+        return new AStar(gridData, currentTopology);
     }
 }
 
@@ -1493,20 +1507,15 @@ function tryRandomMoves(stuckAgents) {
     let madeRandomMove = false;
     
     for (const agent of stuckAgents) {
-        // Try random direction
-        const directions = [
-            { dx: 0, dy: -1 }, // Up
-            { dx: 1, dy: 0 },  // Right
-            { dx: 0, dy: 1 },  // Down
-            { dx: -1, dy: 0 }  // Left
-        ];
+        // Get valid neighbors based on current topology
+        const neighbors = getNeighbors(agent.x, agent.y, currentTopology, gridSize);
         
-        // Shuffle directions
-        directions.sort(() => Math.random() - 0.5);
+        // Shuffle neighbors
+        neighbors.sort(() => Math.random() - 0.5);
         
-        for (const dir of directions) {
-            const nx = agent.x + dir.dx;
-            const ny = agent.y + dir.dy;
+        for (const neighbor of neighbors) {
+            const nx = neighbor.x;
+            const ny = neighbor.y;
             
             // Check if position is valid
             if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) {
@@ -1556,17 +1565,12 @@ function moveAgentTemporarilyForced(agent) {
     // Try an expanded search for temporary positions
     const availablePositions = [];
     
-    // Only check ADJACENT positions (up, right, down, left)
-    const directions = [
-        { dx: 0, dy: -1 }, // Up
-        { dx: 1, dy: 0 },  // Right
-        { dx: 0, dy: 1 },  // Down
-        { dx: -1, dy: 0 }  // Left
-    ];
+    // Get neighbors based on current topology
+    const neighbors = getNeighbors(agent.x, agent.y, currentTopology, gridSize);
     
-    for (const dir of directions) {
-        const nx = agent.x + dir.dx;
-        const ny = agent.y + dir.dy;
+    for (const neighbor of neighbors) {
+        const nx = neighbor.x;
+        const ny = neighbor.y;
         
         // Check if position is valid
         if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) {
@@ -1646,11 +1650,32 @@ function tryMoveBlockingAgents() {
         let nextStep = blockedAgent.path.length > 1 ? blockedAgent.path[1] : null;
         
         // Find agents at targets that are blocking this agent's next step
-        const blockingAgents = agentsAtTargets.filter(targetAgent => 
-            !triedAgents.has(targetAgent.id) && // Skip agents we've already tried
-            (nextStep && targetAgent.x === nextStep.x && targetAgent.y === nextStep.y) || // Blocking next step
-            blockedAgent.path.some(pos => pos.x === targetAgent.x && pos.y === targetAgent.y) // Blocking path
-        );
+        // For Moore topology, include all 8 surrounding cells as potential blockers
+        const blockingAgents = agentsAtTargets.filter(targetAgent => {
+            if (triedAgents.has(targetAgent.id)) return false; // Skip already tried agents
+            
+            // Direct blocker (on the next step)
+            if (nextStep && targetAgent.x === nextStep.x && targetAgent.y === nextStep.y) {
+                return true;
+            }
+            
+            // On path blocker
+            if (blockedAgent.path.some(pos => pos.x === targetAgent.x && pos.y === targetAgent.y)) {
+                return true;
+            }
+            
+            // For Moore topology, also check if agent is diagonally blocking
+            if (currentTopology === TOPOLOGY_MOORE) {
+                // Calculate if target agent is adjacent to any cell in the blocked agent's path
+                return blockedAgent.path.some(pos => {
+                    const dx = Math.abs(pos.x - targetAgent.x);
+                    const dy = Math.abs(pos.y - targetAgent.y);
+                    return dx <= 1 && dy <= 1 && !(dx === 0 && dy === 0);
+                });
+            }
+            
+            return false;
+        });
         
         if (blockingAgents.length > 0) {
             log(`Agent ${blockedAgent.id} is blocked by ${blockingAgents.length} agents at their targets`, 'info');
@@ -2133,10 +2158,26 @@ function simulationStep() {
     }
 }
 
+/**
+ * Detect allowed movement directions based on current topology
+ * @param {number} x - The x coordinate
+ * @param {number} y - The y coordinate
+ * @returns {Array} - Array of valid move positions
+ */
+function getAllowedMoves(x, y) {
+    return getNeighbors(x, y, currentTopology, gridSize).filter(pos => {
+        // Filter out walls and other agents
+        return grid[pos.y][pos.x] !== CELL_WALL && 
+               !agents.some(agent => agent.x === pos.x && agent.y === pos.y);
+    });
+}
+
 // Initialize grid on page load
 window.addEventListener('load', () => {
     log('Programmable Matter Simulation loaded', 'info');
     changeInteractionMode(); // Set initial mode display
+    changeAlgorithm(); // Set initial algorithm display
+    changeTopology(); // Set initial topology display
     initializeGrid();
     
     // Prevent browser zoom during interactions with the grid

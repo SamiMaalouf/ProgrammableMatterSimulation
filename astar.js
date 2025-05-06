@@ -1,16 +1,12 @@
 /**
  * A* Pathfinding Algorithm for Programmable Matter Simulation
- * Using Von Neumann topology (4-directional movement)
+ * Supporting both Von Neumann and Moore topologies
  */
 class AStar {
-    constructor(grid) {
+    constructor(grid, topologyType = TOPOLOGY_VON_NEUMANN) {
         this.grid = grid;
-        this.directions = [
-            { x: 0, y: -1 }, // Up
-            { x: 1, y: 0 },  // Right
-            { x: 0, y: 1 },  // Down
-            { x: -1, y: 0 }  // Left
-        ];
+        this.topologyType = topologyType;
+        this.directions = getDirections(topologyType);
     }
 
     /**
@@ -81,7 +77,9 @@ class AStar {
                 }
 
                 // Distance from start to neighbor
-                const tentativeGScore = gScore[currentKey] + 1;
+                // Use 1.414 (sqrt(2)) as cost for diagonal moves
+                const moveCost = (Math.abs(dir.x) + Math.abs(dir.y) === 2) ? 1.414 : 1;
+                const tentativeGScore = gScore[currentKey] + moveCost;
 
                 // Add neighbor to open set if not there
                 const neighborInOpenSet = openSet.some(node => 
@@ -117,13 +115,19 @@ class AStar {
     }
 
     /**
-     * Manhattan distance heuristic
+     * Heuristic based on the selected topology
      * @param {Object} a - First position {x, y}
      * @param {Object} b - Second position {x, y}
-     * @returns {number} - The Manhattan distance
+     * @returns {number} - The heuristic distance
      */
     heuristic(a, b) {
-        return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+        if (this.topologyType === TOPOLOGY_MOORE) {
+            // Use Chebyshev distance for Moore neighborhoods (8-directional)
+            return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+        } else {
+            // Use Manhattan distance for Von Neumann neighborhoods (4-directional)
+            return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+        }
     }
 
     /**

@@ -1,16 +1,12 @@
 /**
  * BFS (Breadth-First Search) Pathfinding Algorithm for Programmable Matter Simulation
- * Using Von Neumann topology (4-directional movement)
+ * Supporting both Von Neumann and Moore topologies
  */
 class BFS {
-    constructor(grid) {
+    constructor(grid, topologyType = TOPOLOGY_VON_NEUMANN) {
         this.grid = grid;
-        this.directions = [
-            { x: 0, y: -1 }, // Up
-            { x: 1, y: 0 },  // Right
-            { x: 0, y: 1 },  // Down
-            { x: -1, y: 0 }  // Left
-        ];
+        this.topologyType = topologyType;
+        this.directions = getDirections(topologyType);
     }
 
     /**
