@@ -283,4 +283,19 @@ button:disabled {
     max-width: 600px;
     margin: 20px auto;
     touch-action: none;
+}
+
+/* Add styles for the speed slider */
+input[type="range"] {
+    width: 120px;
+    margin: 0 10px;
+    vertical-align: middle;
+}
+
+#speed-value {
+    display: inline-block;
+    width: 60px;
+    text-align: left;
+    font-size: 0.9em;
+    color: #2980b9;
 } 

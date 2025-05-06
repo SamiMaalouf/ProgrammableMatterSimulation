@@ -59,14 +59,17 @@ let sequentialMovementMode = false; // Flag for sequential movement mode
 let sequentialMovesRemaining = 0; // Counter for sequential moves
 let currentAlgorithm = 'astar'; // Algorithm selection: 'astar' or 'bfs'
 let currentTopology = TOPOLOGY_VON_NEUMANN; // Topology selection: 'vonNeumann' or 'moore'
+let simulationSpeed = 300; // Simulation speed in milliseconds (default: 300ms)
 
 // DOM elements
 const gridContainer = document.getElementById('grid-container');
 const gridSizeInput = document.getElementById('grid-size');
+const speedSlider = document.getElementById('simulation-speed');
+const speedValueDisplay = document.getElementById('speed-value');
+const currentSpeedDisplay = document.getElementById('current-speed');
 const applyGridSizeBtn = document.getElementById('apply-grid-size-btn');
 const interactionModeSelect = document.getElementById('interaction-mode');
 const generationModeSelect = document.getElementById('generation-mode');
-const targetShapeSelect = document.getElementById('target-shape');
 const algorithmSelect = document.getElementById('algorithm-select');
 const topologySelect = document.getElementById('topology-select');
 const initializeBtn = document.getElementById('initialize-btn');
@@ -96,9 +99,10 @@ clearWallsBtn.addEventListener('click', clearWalls);
 clearLogBtn.addEventListener('click', clearLog);
 interactionModeSelect.addEventListener('change', changeInteractionMode);
 generationModeSelect.addEventListener('change', changeGenerationMode);
-targetShapeSelect.addEventListener('change', handleTargetShapeChange);
 algorithmSelect.addEventListener('change', changeAlgorithm);
 topologySelect.addEventListener('change', changeTopology);
+speedSlider.addEventListener('input', updateSpeedValue);
+speedSlider.addEventListener('change', changeSimulationSpeed);
 
 /**
  * Log a message to the console with optional type (info, warn, error, success)
@@ -163,32 +167,9 @@ function changeGenerationMode() {
     
     // Update UI based on generation mode
     if (generationMode === GEN_AUTO) {
-        targetShapeSelect.disabled = false;
-        log('Auto generation enabled. Target shape selector is now active.', 'info');
+        log('Auto generation enabled. Agents will be placed at the bottom.', 'info');
     } else {
-        if (targetShapeSelect.value !== 'custom') {
-            targetShapeSelect.value = 'custom';
-        }
-        targetShapeSelect.disabled = false;
         log('Manual placement enabled. Place agents and targets by clicking on the grid.', 'info');
-    }
-}
-
-/**
- * Handle target shape change
- */
-function handleTargetShapeChange() {
-    const shape = targetShapeSelect.value;
-    log(`Target shape changed to: ${shape}`, 'info');
-    
-    if (shape !== 'custom' && generationMode === GEN_AUTO) {
-        // Clear existing targets if auto generation
-        clearTargets();
-        // Generate new targets based on shape
-        setTargetShape(shape);
-        renderGrid();
-    } else if (shape === 'custom') {
-        log('Custom shape selected. Place targets manually on the grid.', 'info');
     }
 }
 
@@ -252,10 +233,8 @@ function initializeGrid() {
             }
         }
         
-        // Set target shape in the middle of the grid
-        if (targetShapeSelect.value !== 'custom') {
-            setTargetShape(targetShapeSelect.value);
-        }
+        // Create targets in a diamond shape in the middle of the grid
+        setTargetShape('diamond');
     }
     
     // Render initial state
@@ -499,6 +478,7 @@ function toggleWall(x, y) {
 
 /**
  * Set the target shape in the middle of the grid
+ * @param {string} shapeName - The name of the shape to use
  */
 function setTargetShape(shapeName) {
     if (isSimulationRunning) {
@@ -506,10 +486,8 @@ function setTargetShape(shapeName) {
         return;
     }
     
-    // Clear old target positions if not in custom mode
-    if (shapeName !== 'custom') {
-        targetPositions = [];
-    }
+    // Clear old target positions
+    targetPositions = [];
     
     // Get the shape definition
     const shape = SHAPES[shapeName];
@@ -633,7 +611,6 @@ function startSimulation() {
     // Disable controls while simulation is running
     interactionModeSelect.disabled = true;
     generationModeSelect.disabled = true;
-    targetShapeSelect.disabled = true;
     applyGridSizeBtn.disabled = true;
     clearAgentsBtn.disabled = true;
     clearTargetsBtn.disabled = true;
@@ -644,8 +621,8 @@ function startSimulation() {
     // Assign targets to agents using Hungarian algorithm
     assignTargets();
     
-    // Start simulation loop
-    simulationInterval = setInterval(simulationStep, 300);
+    // Start simulation loop with current speed
+    simulationInterval = setInterval(simulationStep, simulationSpeed);
 }
 
 /**
@@ -658,7 +635,6 @@ function pauseSimulation() {
     // Re-enable controls
     interactionModeSelect.disabled = false;
     generationModeSelect.disabled = false;
-    targetShapeSelect.disabled = false;
     applyGridSizeBtn.disabled = false;
     clearAgentsBtn.disabled = false;
     clearTargetsBtn.disabled = false;
@@ -2178,6 +2154,7 @@ window.addEventListener('load', () => {
     changeInteractionMode(); // Set initial mode display
     changeAlgorithm(); // Set initial algorithm display
     changeTopology(); // Set initial topology display
+    updateSpeedValue(); // Set initial speed display
     initializeGrid();
     
     // Prevent browser zoom during interactions with the grid
@@ -2277,4 +2254,27 @@ function preventBrowserZoom() {
     }, { passive: false });
     
     log('Browser zoom prevention enabled', 'info');
+}
+
+/**
+ * Update the displayed speed value when the slider is moved
+ */
+function updateSpeedValue() {
+    const speed = speedSlider.value;
+    speedValueDisplay.textContent = `${speed} ms`;
+}
+
+/**
+ * Change the simulation speed
+ */
+function changeSimulationSpeed() {
+    simulationSpeed = parseInt(speedSlider.value);
+    currentSpeedDisplay.textContent = `${simulationSpeed} ms`;
+    log(`Simulation speed changed to: ${simulationSpeed}ms`, 'info');
+    
+    // If simulation is running, restart it with the new speed
+    if (isSimulationRunning) {
+        clearInterval(simulationInterval);
+        simulationInterval = setInterval(simulationStep, simulationSpeed);
+    }
 }
