@@ -829,7 +829,25 @@ function assignTargets() {
  */
 function changeAlgorithm() {
     currentAlgorithm = algorithmSelect.value;
-    let algorithmName = currentAlgorithm === 'astar' ? 'A*' : 'BFS';
+    let algorithmName;
+    
+    switch (currentAlgorithm) {
+        case 'astar':
+            algorithmName = 'A*';
+            break;
+        case 'bfs':
+            algorithmName = 'BFS';
+            break;
+        case 'minimax':
+            algorithmName = 'Minimax';
+            break;
+        case 'expectimax':
+            algorithmName = 'Expectimax';
+            break;
+        default:
+            algorithmName = 'A*';
+    }
+    
     currentAlgorithmDisplay.textContent = algorithmName;
     log(`Pathfinding algorithm changed to: ${algorithmName}`, 'info');
 }
@@ -852,6 +870,10 @@ function changeTopology() {
 function createPathfinder(gridData) {
     if (currentAlgorithm === 'bfs') {
         return new BFS(gridData, currentTopology);
+    } else if (currentAlgorithm === 'minimax') {
+        return new Minimax(gridData, currentTopology);
+    } else if (currentAlgorithm === 'expectimax') {
+        return new Expectimax(gridData, currentTopology);
     } else {
         return new AStar(gridData, currentTopology);
     }
