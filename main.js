@@ -72,6 +72,7 @@ const interactionModeSelect = document.getElementById('interaction-mode');
 const generationModeSelect = document.getElementById('generation-mode');
 const algorithmSelect = document.getElementById('algorithm-select');
 const topologySelect = document.getElementById('topology-select');
+const movementModeSelect = document.getElementById('movement-mode-select');
 const initializeBtn = document.getElementById('initialize-btn');
 const startBtn = document.getElementById('start-btn');
 const resetBtn = document.getElementById('reset-btn');
@@ -101,6 +102,7 @@ interactionModeSelect.addEventListener('change', changeInteractionMode);
 generationModeSelect.addEventListener('change', changeGenerationMode);
 algorithmSelect.addEventListener('change', changeAlgorithm);
 topologySelect.addEventListener('change', changeTopology);
+movementModeSelect.addEventListener('change', changeMovementMode);
 speedSlider.addEventListener('input', updateSpeedValue);
 speedSlider.addEventListener('change', changeSimulationSpeed);
 
@@ -608,6 +610,14 @@ function startSimulation() {
     // Reset the failed deadlock resolution counter
     failedDeadlockResolutionAttempts = 0;
     
+    // Initialize sequential movement counter if in sequential mode
+    if (sequentialMovementMode) {
+        sequentialMovesRemaining = agents.length;
+        log(`Starting in sequential mode: Agents will move one at a time`, 'info');
+    } else {
+        log(`Starting in parallel mode: All agents will move simultaneously`, 'info');
+    }
+    
     // Disable controls while simulation is running
     interactionModeSelect.disabled = true;
     generationModeSelect.disabled = true;
@@ -615,6 +625,7 @@ function startSimulation() {
     clearAgentsBtn.disabled = true;
     clearTargetsBtn.disabled = true;
     clearWallsBtn.disabled = true;
+    // Keep movement mode select enabled to allow switching between sequential and parallel
     
     isSimulationRunning = true;
     
@@ -639,6 +650,7 @@ function pauseSimulation() {
     clearAgentsBtn.disabled = false;
     clearTargetsBtn.disabled = false;
     clearWallsBtn.disabled = false;
+    // Movement mode select is always enabled
 }
 
 /**
@@ -1873,6 +1885,11 @@ function simulationStep() {
             return distA - distB;
         });
         
+        // Log movement mode for this step
+        if (sequentialMovementMode) {
+            log(`Running in sequential mode with ${sequentialMovesRemaining} moves remaining`, 'info');
+        }
+        
         // Move each agent one step along its path
         let agentsMovedCount = 0;
         for (const agent of prioritizedAgents) {
@@ -1885,6 +1902,7 @@ function simulationStep() {
             
             // In sequential mode, only move one agent per step
             if (sequentialMovementMode && agentsMovedCount > 0) {
+                log(`Sequential mode: stopping after moving agent ${prioritizedAgents[0].id}`, 'info');
                 break;
             }
             
@@ -1921,10 +1939,10 @@ function simulationStep() {
                     log(`[Sequential Mode] Moving agent ${agent.id} from (${agent.x}, ${agent.y}) to (${nextStep.x}, ${nextStep.y})`, 'info');
                     sequentialMovesRemaining--;
                     
-                    // Check if we should exit sequential mode
+                    // Check if we should reset the sequential moves counter
                     if (sequentialMovesRemaining <= 0) {
-                        log(`Sequential movement complete, returning to normal movement mode`, 'success');
-                        sequentialMovementMode = false;
+                        sequentialMovesRemaining = agents.length;
+                        log(`Sequential move cycle complete, resetting counter to ${sequentialMovesRemaining}`, 'info');
                     }
                 } else {
                     log(`Moving agent ${agent.id} from (${agent.x}, ${agent.y}) to (${nextStep.x}, ${nextStep.y})`, 'info');
@@ -2148,12 +2166,35 @@ function getAllowedMoves(x, y) {
     });
 }
 
+/**
+ * Change the movement mode between sequential and parallel
+ */
+function changeMovementMode() {
+    const mode = movementModeSelect.value;
+    sequentialMovementMode = mode === 'sequential';
+    
+    // Update movement mode display
+    const currentMovementModeDisplay = document.getElementById('current-movement-mode');
+    if (currentMovementModeDisplay) {
+        currentMovementModeDisplay.textContent = sequentialMovementMode ? 'Sequential' : 'Parallel';
+    }
+    
+    // Set sequential moves counter if in sequential mode
+    if (sequentialMovementMode) {
+        sequentialMovesRemaining = agents.length;
+        log(`Movement mode changed to Sequential: Agents will move one at a time`, 'info');
+    } else {
+        log(`Movement mode changed to Parallel: All agents will move simultaneously`, 'info');
+    }
+}
+
 // Initialize grid on page load
 window.addEventListener('load', () => {
     log('Programmable Matter Simulation loaded', 'info');
     changeInteractionMode(); // Set initial mode display
     changeAlgorithm(); // Set initial algorithm display
     changeTopology(); // Set initial topology display
+    changeMovementMode(); // Set initial movement mode display
     updateSpeedValue(); // Set initial speed display
     initializeGrid();
     
