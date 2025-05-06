@@ -63,6 +63,14 @@
                     <option value="sequential">Sequential</option>
                 </select>
             </div>
+
+            <div class="control-group">
+                <label for="decision-mode-select">Decision Mode:</label>
+                <select id="decision-mode-select">
+                    <option value="centralized">Centralized</option>
+                    <option value="distributed">Distributed</option>
+                </select>
+            </div>
         </div>
         
         <div class="action-buttons">
@@ -111,6 +119,10 @@
                     <div class="stat">
                         <span class="stat-label">Movement Mode:</span>
                         <span class="stat-value" id="current-movement-mode">Parallel</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Decision Mode:</span>
+                        <span class="stat-value" id="current-decision-mode">Centralized</span>
                     </div>
                     <div class="stat">
                         <span class="stat-label">Simulation Speed:</span>

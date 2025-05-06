@@ -57,6 +57,12 @@ let generationMode = GEN_MANUAL;
 let failedDeadlockResolutionAttempts = 0; // Track failed deadlock resolution attempts
 let sequentialMovementMode = false; // Flag for sequential movement mode
 let sequentialMovesRemaining = 0; // Counter for sequential moves
+
+// Decision making modes
+const DECISION_CENTRALIZED = 'centralized';
+const DECISION_DISTRIBUTED = 'distributed';
+let currentDecisionMode = DECISION_CENTRALIZED; // Default to centralized decision-making
+
 let currentAlgorithm = 'astar'; // Algorithm selection: 'astar' or 'bfs'
 let currentTopology = TOPOLOGY_VON_NEUMANN; // Topology selection: 'vonNeumann' or 'moore'
 let simulationSpeed = 300; // Simulation speed in milliseconds (default: 300ms)
@@ -78,6 +84,7 @@ const generationModeSelect = document.getElementById('generation-mode');
 const algorithmSelect = document.getElementById('algorithm-select');
 const topologySelect = document.getElementById('topology-select');
 const movementModeSelect = document.getElementById('movement-mode-select');
+const decisionModeSelect = document.getElementById('decision-mode-select');
 const initializeBtn = document.getElementById('initialize-btn');
 const startBtn = document.getElementById('start-btn');
 const resetBtn = document.getElementById('reset-btn');
@@ -108,6 +115,7 @@ generationModeSelect.addEventListener('change', changeGenerationMode);
 algorithmSelect.addEventListener('change', changeAlgorithm);
 topologySelect.addEventListener('change', changeTopology);
 movementModeSelect.addEventListener('change', changeMovementMode);
+decisionModeSelect.addEventListener('change', changeDecisionMode);
 speedSlider.addEventListener('input', updateSpeedValue);
 speedSlider.addEventListener('change', changeSimulationSpeed);
 
@@ -463,7 +471,8 @@ function addAgent(x, y) {
         targetX: null,
         targetY: null,
         path: [],
-        isRetreating: false
+        isRetreating: false,
+        visibilityRange: currentDecisionMode === DECISION_DISTRIBUTED ? 3 : Infinity // Limited visibility in distributed mode
     };
     
     agents.push(agent);
@@ -866,20 +875,54 @@ function calculatePath(agent) {
             gridCopy.push([...grid[y]]);
         }
         
-        // Remove agents from grid copy to avoid blocking paths
-        // except for the current agent
-        agents.forEach(a => {
-            if (a.id !== agent.id) {
-                // Only mark agents at their final targets as obstacles
-                // or those who haven't started moving yet
-                if ((a.x === a.targetX && a.y === a.targetY) || 
-                    (!a.path || a.path.length <= 1)) {
-                    gridCopy[a.y][a.x] = CELL_WALL;
-                } else {
-                    gridCopy[a.y][a.x] = CELL_EMPTY;
+        // Handle differently based on decision making mode
+        if (currentDecisionMode === DECISION_CENTRALIZED) {
+            // Centralized approach - remove agents from grid copy to avoid blocking paths
+            // except for the current agent
+            agents.forEach(a => {
+                if (a.id !== agent.id) {
+                    // Only mark agents at their final targets as obstacles
+                    // or those who haven't started moving yet
+                    if ((a.x === a.targetX && a.y === a.targetY) || 
+                        (!a.path || a.path.length <= 1)) {
+                        gridCopy[a.y][a.x] = CELL_WALL;
+                    } else {
+                        gridCopy[a.y][a.x] = CELL_EMPTY;
+                    }
+                }
+            });
+        } else {
+            // Distributed approach - agent only has visibility within a limited range
+            // First, mark all cells outside visibility range as unknown (same as walls for pathfinding)
+            for (let y = 0; y < gridCopy.length; y++) {
+                for (let x = 0; x < gridCopy[y].length; x++) {
+                    // Calculate Manhattan distance from agent
+                    const distance = Math.abs(x - agent.x) + Math.abs(y - agent.y);
+                    
+                    // If outside visibility range, mark as wall (unknown)
+                    if (distance > agent.visibilityRange) {
+                        // But keep the target visible as a special case
+                        if (!(x === agent.targetX && y === agent.targetY)) {
+                            gridCopy[y][x] = CELL_WALL;
+                        }
+                    }
                 }
             }
-        });
+            
+            // Only consider agents within visibility range as obstacles
+            agents.forEach(a => {
+                if (a.id !== agent.id) {
+                    const distance = Math.abs(a.x - agent.x) + Math.abs(a.y - agent.y);
+                    
+                    if (distance <= agent.visibilityRange) {
+                        // Visible agent is an obstacle
+                        gridCopy[a.y][a.x] = CELL_WALL;
+                    }
+                }
+            });
+            
+            log(`Agent ${agent.id} calculating path with visibility range ${agent.visibilityRange}`, 'info');
+        }
         
         const pathfinder = createPathfinder(gridCopy);
         
@@ -930,6 +973,26 @@ function findPathIgnoringAgents(agent) {
             }
         }
         
+        // In distributed mode, apply visibility constraints
+        if (currentDecisionMode === DECISION_DISTRIBUTED) {
+            for (let y = 0; y < clearedGrid.length; y++) {
+                for (let x = 0; x < clearedGrid[y].length; x++) {
+                    // Calculate Manhattan distance from agent
+                    const distance = Math.abs(x - agent.x) + Math.abs(y - agent.y);
+                    
+                    // If outside visibility range, mark as wall (unknown)
+                    if (distance > agent.visibilityRange) {
+                        // But keep the target visible as a special case
+                        if (!(x === agent.targetX && y === agent.targetY)) {
+                            clearedGrid[y][x] = CELL_WALL;
+                        }
+                    }
+                }
+            }
+            
+            log(`Agent ${agent.id} finding ignoring-agents path with visibility range ${agent.visibilityRange}`, 'info');
+        }
+        
         const pathfinder = createPathfinder(clearedGrid);
         const path = pathfinder.findPath(
             { x: agent.x, y: agent.y },
@@ -964,7 +1027,9 @@ function findTemporaryTarget(agent) {
     const retreatOptions = [];
     
     // Expand search radius for retreat
-    const searchRadius = 3;
+    // In distributed mode, limit search radius to visibility range
+    const searchRadius = currentDecisionMode === DECISION_DISTRIBUTED ? 
+        Math.min(3, agent.visibilityRange) : 3;
     
     // Check all cells within searchRadius
     for (let dy = -searchRadius; dy <= searchRadius; dy++) {
@@ -979,7 +1044,18 @@ function findTemporaryTarget(agent) {
             if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) {
                 // Check if cell is empty and no other agent is there
                 const isEmpty = grid[ny][nx] !== CELL_WALL;
-                const isOccupied = agents.some(a => a.id !== agent.id && a.x === nx && a.y === ny);
+                
+                // In distributed mode, only consider agents within visibility range
+                let isOccupied = false;
+                if (currentDecisionMode === DECISION_DISTRIBUTED) {
+                    isOccupied = agents.some(a => {
+                        // Only consider visible agents
+                        const distance = Math.abs(a.x - agent.x) + Math.abs(a.y - agent.y);
+                        return a.id !== agent.id && a.x === nx && a.y === ny && distance <= agent.visibilityRange;
+                    });
+                } else {
+                    isOccupied = agents.some(a => a.id !== agent.id && a.x === nx && a.y === ny);
+                }
                 
                 if (isEmpty && !isOccupied) {
                     // Calculate Manhattan distance to actual target
@@ -1016,6 +1092,21 @@ function findTemporaryTarget(agent) {
             clearedGrid.push([]);
             for (let x = 0; x < grid[y].length; x++) {
                 clearedGrid[y][x] = grid[y][x] === CELL_WALL ? CELL_WALL : CELL_EMPTY;
+            }
+        }
+        
+        // In distributed mode, apply visibility constraints
+        if (currentDecisionMode === DECISION_DISTRIBUTED) {
+            for (let y = 0; y < clearedGrid.length; y++) {
+                for (let x = 0; x < clearedGrid[y].length; x++) {
+                    // Calculate Manhattan distance from agent
+                    const distance = Math.abs(x - agent.x) + Math.abs(y - agent.y);
+                    
+                    // If outside visibility range, mark as wall (unknown)
+                    if (distance > agent.visibilityRange) {
+                        clearedGrid[y][x] = CELL_WALL;
+                    }
+                }
             }
         }
         
@@ -2378,6 +2469,7 @@ window.addEventListener('load', () => {
     changeAlgorithm(); // Set initial algorithm display
     changeTopology(); // Set initial topology display
     changeMovementMode(); // Set initial movement mode display
+    changeDecisionMode(); // Set initial decision mode display
     updateSpeedValue(); // Set initial speed display
     initializeGrid();
     
@@ -2521,3 +2613,36 @@ function generateDeadlockSignature(deadlockedAgentIds) {
     
     return signature;
 }
+
+/**
+ * Change the decision mode between centralized and distributed
+ */
+function changeDecisionMode() {
+    const mode = decisionModeSelect.value;
+    currentDecisionMode = mode;
+    
+    // Update decision mode display
+    const currentDecisionModeDisplay = document.getElementById('current-decision-mode');
+    if (currentDecisionModeDisplay) {
+        currentDecisionModeDisplay.textContent = currentDecisionMode.charAt(0).toUpperCase() + currentDecisionMode.slice(1);
+    }
+    
+    log(`Decision mode changed to ${currentDecisionMode}`, 'info');
+    
+    if (currentDecisionMode === DECISION_DISTRIBUTED) {
+        log('In distributed mode, agents have limited visibility and make independent decisions', 'info');
+        
+        // Add visibility range to each agent if not already set
+        agents.forEach(agent => {
+            if (agent.visibilityRange === undefined) {
+                agent.visibilityRange = 3; // Default visibility range
+            }
+        });
+    } else {
+        log('In centralized mode, agents have full visibility and coordinated decision making', 'info');
+    }
+}
+
+/**
+ * Detect allowed movement directions based on current topology
+ */
