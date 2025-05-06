@@ -54,6 +54,7 @@ let totalMoves = 0;
 let deadlockHandler = null;
 let currentMode = MODE_WALL;
 let generationMode = GEN_MANUAL;
+let failedDeadlockResolutionAttempts = 0; // Track failed deadlock resolution attempts
 
 // DOM elements
 const gridContainer = document.getElementById('grid-container');
@@ -616,6 +617,9 @@ function startSimulation() {
         return;
     }
     
+    // Reset the failed deadlock resolution counter
+    failedDeadlockResolutionAttempts = 0;
+    
     // Disable controls while simulation is running
     interactionModeSelect.disabled = true;
     generationModeSelect.disabled = true;
@@ -911,7 +915,7 @@ function findTemporaryTarget(agent) {
 }
 
 /**
- * Try to resolve deadlock by reassigning targets
+ * Try to resolve deadlock by reassigning targets, including chain movements
  * @returns {boolean} - Whether a reassignment was successful
  */
 function tryTargetReassignment() {
@@ -934,86 +938,258 @@ function tryTargetReassignment() {
     
     log(`Found ${emptyTargets.length} empty targets available for reassignment`, 'info');
     
-    // Track which agents have been tried to avoid infinite loops
-    const triedAgents = new Set();
+    // PRIORITIZE: First identify agents at targets that are blocking others
+    const blockingAgentsAtTargets = [];
+    const blockedAgents = new Map(); // Map of blocked agent IDs to the agents blocking them
     
-    // First strategy: Try moving agents at targets to empty targets
     for (const agent of agentsAtTarget) {
-        // Skip if we've already tried this agent
-        if (triedAgents.has(agent.id)) continue;
-        triedAgents.add(agent.id);
+        // Find which agents this agent is blocking
+        const agentsBlocked = [];
         
-        // Check if reassigning this agent could help
-        const isBlockingOthers = agentsNotAtTarget.some(blockedAgent => 
-            blockedAgent.path && blockedAgent.path.some(pos => 
+        for (const blockedAgent of agentsNotAtTarget) {
+            if (blockedAgent.path && blockedAgent.path.some(pos => 
                 pos.x === agent.x && pos.y === agent.y
-            )
-        );
+            )) {
+                agentsBlocked.push(blockedAgent);
+                // Track which agent is blocking each blocked agent
+                blockedAgents.set(blockedAgent.id, agent);
+            }
+        }
         
-        // Prioritize agents that are blocking others
-        if (!isBlockingOthers) continue;
+        if (agentsBlocked.length > 0) {
+            blockingAgentsAtTargets.push({
+                agent: agent,
+                blocking: agentsBlocked,
+                blockCount: agentsBlocked.length // Track how many agents are being blocked
+            });
+            log(`Agent ${agent.id} at target (${agent.x}, ${agent.y}) is blocking ${agentsBlocked.length} other agents`, 'warn');
+        }
+    }
+    
+    // Sort blocking agents by how many others they're blocking (highest first)
+    blockingAgentsAtTargets.sort((a, b) => b.blockCount - a.blockCount);
+    
+    // Log the worst blocker if there is one
+    if (blockingAgentsAtTargets.length > 0) {
+        const worstBlocker = blockingAgentsAtTargets[0];
+        log(`Highest priority blocker: Agent ${worstBlocker.agent.id} is blocking ${worstBlocker.blockCount} agents`, 'warn');
+    }
+    
+    // First strategy: Try to create chains of movements
+    // Look for agents at targets that could move to free targets to make space
+    if (agentsAtTarget.length > 0 && emptyTargets.length > 0) {
+        log(`Looking for chain movements to resolve deadlocks...`, 'info');
         
-        log(`Agent ${agent.id} at target (${agent.x}, ${agent.y}) is blocking other agents, trying to reassign`, 'info');
+        // Try all agents at targets, prioritizing those blocking others
+        const agentsToTry = [...blockingAgentsAtTargets.map(info => info.agent), 
+                             ...agentsAtTarget.filter(a => !blockingAgentsAtTargets.some(info => info.agent.id === a.id))];
         
-        // Try each empty target
-        for (const target of emptyTargets) {
-            // Skip if this is already the agent's target
-            if (target.x === agent.targetX && target.y === agent.targetY) continue;
-            
-            // Check if there's a path to this new target
-            const clearedGrid = [];
-            for (let y = 0; y < grid.length; y++) {
-                clearedGrid.push([]);
-                for (let x = 0; x < grid[y].length; x++) {
-                    if (grid[y][x] === CELL_WALL) {
-                        clearedGrid[y][x] = CELL_WALL;
-                    } else {
-                        // Mark other agents at targets as walls
-                        const agentAtPos = agents.find(a => 
-                            a.id !== agent.id && a.x === x && a.y === y && 
-                            a.x === a.targetX && a.y === a.targetY
-                        );
-                        clearedGrid[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
+        for (const agent of agentsToTry) {
+            // Try each empty target for this agent
+            for (const target of emptyTargets) {
+                // Skip if this is already the agent's target
+                if (target.x === agent.targetX && target.y === agent.targetY) continue;
+                
+                // See if this agent can reach this empty target
+                const clearedGrid = [];
+                for (let y = 0; y < grid.length; y++) {
+                    clearedGrid.push([]);
+                    for (let x = 0; x < grid[y].length; x++) {
+                        if (grid[y][x] === CELL_WALL) {
+                            clearedGrid[y][x] = CELL_WALL;
+                        } else {
+                            // Mark other agents at targets as walls
+                            const agentAtPos = agents.find(a => 
+                                a.id !== agent.id && a.x === x && a.y === y && 
+                                a.x === a.targetX && a.y === a.targetY
+                            );
+                            clearedGrid[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
+                        }
                     }
                 }
-            }
-            
-            const astar = new AStar(clearedGrid);
-            const path = astar.findPath(
-                { x: agent.x, y: agent.y },
-                { x: target.x, y: target.y }
-            );
-            
-            if (path.length > 1) {
-                // Found a viable target reassignment
-                log(`Reassigning agent ${agent.id} from (${agent.targetX}, ${agent.targetY}) to target at (${target.x}, ${target.y})`, 'success');
                 
-                // Update the agent's target
-                agent.targetX = target.x;
-                agent.targetY = target.y;
-                agent.path = path;
+                const astar = new AStar(clearedGrid);
+                const path = astar.findPath(
+                    { x: agent.x, y: agent.y },
+                    { x: target.x, y: target.y }
+                );
                 
-                // Recalculate paths for blocked agents
-                for (const blockedAgent of agentsNotAtTarget) {
-                    calculatePath(blockedAgent);
+                if (path.length > 1) {
+                    // Agent can reach this empty target
+                    // Now check if this creates a chain that helps a blocked agent
+                    
+                    // Create a test grid where this agent has moved to the new target
+                    const testGrid = [];
+                    for (let y = 0; y < grid.length; y++) {
+                        testGrid.push([...grid[y]]);
+                    }
+                    // Clear the agent's current position in the test grid
+                    testGrid[agent.y][agent.x] = CELL_EMPTY;
+                    
+                    // Now check if this helps any blocked agents
+                    let helpsBlockedAgent = false;
+                    
+                    // First, see if any blocking agent could now move to this agent's original target
+                    for (const blockingInfo of blockingAgentsAtTargets) {
+                        const blockingAgent = blockingInfo.agent;
+                        if (blockingAgent.id === agent.id) continue; // Skip the agent we're moving
+                        
+                        // Can this blocking agent reach the newly vacated target?
+                        const blockingAstar = new AStar(testGrid);
+                        const blockingPath = blockingAstar.findPath(
+                            { x: blockingAgent.x, y: blockingAgent.y },
+                            { x: agent.targetX, y: agent.targetY }
+                        );
+                        
+                        if (blockingPath.length > 1) {
+                            // This creates a chain! The blocking agent can move to the vacated target
+                            
+                            // Now test if this would help the agents it was blocking
+                            // Clear the blocking agent's current position
+                            testGrid[blockingAgent.y][blockingAgent.x] = CELL_EMPTY;
+                            
+                            for (const blockedAgent of blockingInfo.blocking) {
+                                // Can this blocked agent now reach its target?
+                                const blockedAstar = new AStar(testGrid);
+                                const blockedPath = blockedAstar.findPath(
+                                    { x: blockedAgent.x, y: blockedAgent.y },
+                                    { x: blockedAgent.targetX, y: blockedAgent.targetY }
+                                );
+                                
+                                if (blockedPath.length > 1) {
+                                    helpsBlockedAgent = true;
+                                    log(`Found a chain movement: Agent ${agent.id} → empty target (${target.x}, ${target.y}), ` +
+                                        `Agent ${blockingAgent.id} → vacated target (${agent.targetX}, ${agent.targetY}), ` +
+                                        `helps Agent ${blockedAgent.id} reach its target`, 'success');
+                                    break;
+                                }
+                            }
+                            
+                            if (helpsBlockedAgent) break;
+                        }
+                    }
+                    
+                    // Also check if this directly helps any blocked agent (without a middle step)
+                    if (!helpsBlockedAgent) {
+                        for (const blockedAgent of agentsNotAtTarget) {
+                            // Can this blocked agent now reach its target?
+                            const blockedAstar = new AStar(testGrid);
+                            const blockedPath = blockedAstar.findPath(
+                                { x: blockedAgent.x, y: blockedAgent.y },
+                                { x: blockedAgent.targetX, y: blockedAgent.targetY }
+                            );
+                            
+                            if (blockedPath.length > 1) {
+                                helpsBlockedAgent = true;
+                                log(`Direct chain: Agent ${agent.id} → empty target (${target.x}, ${target.y}) helps ` +
+                                    `Agent ${blockedAgent.id} reach its target`, 'success');
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (helpsBlockedAgent) {
+                        // Execute the first step in the chain
+                        log(`Executing chain: Moving agent ${agent.id} from (${agent.targetX}, ${agent.targetY}) to target (${target.x}, ${target.y})`, 'success');
+                        
+                        // Update agent's target and path
+                        agent.targetX = target.x;
+                        agent.targetY = target.y;
+                        agent.path = path;
+                        
+                        // Remove this target from available targets
+                        const targetIndex = emptyTargets.findIndex(t => t.x === target.x && t.y === target.y);
+                        if (targetIndex !== -1) {
+                            emptyTargets.splice(targetIndex, 1);
+                        }
+                        
+                        // Recalculate paths for all agents
+                        agents.forEach(a => {
+                            if (a.id !== agent.id) {
+                                calculatePath(a);
+                            }
+                        });
+                        
+                        return true;
+                    }
                 }
-                
-                return true;
             }
         }
     }
     
-    // Reset tried agents for the next strategy
-    triedAgents.clear();
+    // Second strategy: Move blocking agents at targets to empty targets (direct approach)
+    if (blockingAgentsAtTargets.length > 0 && emptyTargets.length > 0) {
+        log(`Attempting direct moves for ${blockingAgentsAtTargets.length} blocking agents to ${emptyTargets.length} empty targets`, 'info');
+        
+        // For each blocking agent (already sorted by most blocking first)
+        for (const blockingInfo of blockingAgentsAtTargets) {
+            const agent = blockingInfo.agent;
+            
+            log(`Trying to move agent ${agent.id} which is blocking ${blockingInfo.blockCount} other agents`, 'info');
+            
+            // Try each empty target, sorting them by distance to agent for efficiency
+            const sortedTargets = [...emptyTargets].sort((a, b) => {
+                const distA = Math.abs(agent.x - a.x) + Math.abs(agent.y - a.y);
+                const distB = Math.abs(agent.x - b.x) + Math.abs(agent.y - b.y);
+                return distA - distB; // Sort by closest first
+            });
+            
+            for (const target of sortedTargets) {
+                // Skip if this is already the agent's target
+                if (target.x === agent.targetX && target.y === agent.targetY) continue;
+                
+                // Check if there's a path to this new target
+                const clearedGrid = [];
+                for (let y = 0; y < grid.length; y++) {
+                    clearedGrid.push([]);
+                    for (let x = 0; x < grid[y].length; x++) {
+                        if (grid[y][x] === CELL_WALL) {
+                            clearedGrid[y][x] = CELL_WALL;
+                        } else {
+                            // Mark other agents at targets as walls
+                            const agentAtPos = agents.find(a => 
+                                a.id !== agent.id && a.x === x && a.y === y && 
+                                a.x === a.targetX && a.y === a.targetY
+                            );
+                            clearedGrid[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
+                        }
+                    }
+                }
+                
+                const astar = new AStar(clearedGrid);
+                const path = astar.findPath(
+                    { x: agent.x, y: agent.y },
+                    { x: target.x, y: target.y }
+                );
+                
+                if (path.length > 1) {
+                    // Found a viable target reassignment
+                    log(`Reassigning blocking agent ${agent.id} (blocks ${blockingInfo.blockCount} agents) from target (${agent.targetX}, ${agent.targetY}) to target at (${target.x}, ${target.y})`, 'success');
+                    
+                    // Update the agent's target
+                    agent.targetX = target.x;
+                    agent.targetY = target.y;
+                    agent.path = path;
+                    
+                    // Remove this target from empty targets so other agents don't get assigned the same target
+                    const targetIndex = emptyTargets.findIndex(t => t.x === target.x && t.y === target.y);
+                    if (targetIndex !== -1) {
+                        emptyTargets.splice(targetIndex, 1);
+                    }
+                    
+                    // Recalculate paths for blocked agents
+                    blockingInfo.blocking.forEach(blockedAgent => {
+                        calculatePath(blockedAgent);
+                    });
+                    
+                    return true;
+                }
+            }
+        }
+    }
     
-    // Second strategy: Try assigning blocked agents to different targets
+    // Third strategy: Try assigning blocked agents to different targets
     for (const blockedAgent of agentsNotAtTarget) {
-        // Skip if we've already tried this agent
-        if (triedAgents.has(blockedAgent.id)) continue;
-        triedAgents.add(blockedAgent.id);
-        
-        log(`Trying to find alternative target for blocked agent ${blockedAgent.id}`, 'info');
-        
         // Try each empty target
         for (const target of emptyTargets) {
             // Skip if this is already the agent's target
@@ -1050,13 +1226,12 @@ function tryTargetReassignment() {
                 blockedAgent.targetX = target.x;
                 blockedAgent.targetY = target.y;
                 blockedAgent.path = path;
-                
                 return true;
             }
         }
     }
     
-    // Third strategy: Try swapping target assignments between agents
+    // Fourth strategy: Try swapping target assignments between agents
     // This is for cases where there are no empty targets
     if (emptyTargets.length === 0) {
         log('No empty targets available, trying to swap target assignments between agents', 'info');
@@ -1064,11 +1239,6 @@ function tryTargetReassignment() {
         // Try swapping targets between blocked agents and agents at targets
         for (const blockedAgent of agentsNotAtTarget) {
             for (const agentAtTarget of agentsAtTarget) {
-                // Skip if we've already tried this pair
-                const pairKey = `${blockedAgent.id}-${agentAtTarget.id}`;
-                if (triedAgents.has(pairKey)) continue;
-                triedAgents.add(pairKey);
-                
                 log(`Trying to swap targets between blocked agent ${blockedAgent.id} and agent ${agentAtTarget.id} at target`, 'info');
                 
                 // Check if the blocked agent can reach the target of the agent at target
@@ -1146,11 +1316,6 @@ function tryTargetReassignment() {
                 const agent1 = agentsNotAtTarget[i];
                 const agent2 = agentsNotAtTarget[j];
                 
-                // Skip if we've already tried this pair
-                const pairKey = `${agent1.id}-${agent2.id}`;
-                if (triedAgents.has(pairKey)) continue;
-                triedAgents.add(pairKey);
-                
                 log(`Trying to swap targets between blocked agents ${agent1.id} and ${agent2.id}`, 'info');
                 
                 // Check if agent1 can reach agent2's target
@@ -1223,7 +1388,7 @@ function tryTargetReassignment() {
         }
     }
     
-    log('Could not find any viable target reassignments after trying all combinations', 'error');
+    log('Could not find any viable target reassignments', 'error');
     return false;
 }
 
@@ -1755,7 +1920,37 @@ function simulationStep() {
         if (!agentsMoved) {
             log('No agents moved in this step', 'warn');
             
-            // Try one last attempt to move agents at targets that might be blocking others
+            // Increment the failed resolution counter
+            failedDeadlockResolutionAttempts++;
+            log(`Deadlock resolution attempt #${failedDeadlockResolutionAttempts}`, 'warn');
+            
+            // If we've reached 5 failed attempts, pause and restart the simulation
+            if (failedDeadlockResolutionAttempts >= 5) {
+                log(`5 failed deadlock resolution attempts - automatically restarting simulation`, 'warn');
+                
+                // Pause the simulation
+                pauseSimulation();
+                
+                // Reset the failed resolution counter
+                failedDeadlockResolutionAttempts = 0;
+                
+                // Wait a moment then restart (using setTimeout to allow the UI to update)
+                setTimeout(() => {
+                    log(`Automatically restarting simulation with fresh target assignments`, 'info');
+                    startSimulation();
+                }, 500);
+                
+                return; // Exit this simulation step
+            }
+            
+            // Try complete target reassignment first
+            log('Attempting complete target reassignment as first strategy', 'warn');
+            if (tryTargetReassignment()) {
+                return; // Continue simulation if successful
+            }
+            
+            // If that fails, try moving blocking agents
+            log('Target reassignment failed, trying to move blocking agents', 'info');
             if (tryMoveBlockingAgents()) {
                 return; // Continue simulation if successful
             }
