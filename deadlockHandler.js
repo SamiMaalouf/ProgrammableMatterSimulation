@@ -144,11 +144,11 @@ class DeadlockHandler {
         // Create a modified grid with slight penalties for cells near other agents
         const modifiedGrid = this.createModifiedGrid();
         
-        // Use A* with the modified grid
-        const astar = new AStar(modifiedGrid);
+        // Use the selected pathfinding algorithm
+        const pathfinder = createPathfinder(modifiedGrid);
         
         // Find new path to target
-        const newPath = astar.findPath(
+        const newPath = pathfinder.findPath(
             { x: agent.x, y: agent.y }, 
             { x: agent.targetX, y: agent.targetY }
         );
@@ -267,8 +267,8 @@ class DeadlockHandler {
         }
         
         // Find a path ignoring all other agents
-        const astar = new AStar(clearedGrid);
-        const path = astar.findPath(
+        const pathfinder = createPathfinder(clearedGrid);
+        const path = pathfinder.findPath(
             { x: agent.x, y: agent.y },
             { x: agent.targetX, y: agent.targetY }
         );

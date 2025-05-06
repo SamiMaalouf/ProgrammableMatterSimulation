@@ -2,18 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Programmable Matter Simulation</title>
     <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body oncontextmenu="return false;">
     <div class="container">
         <h1>Programmable Matter Simulation</h1>
         
         <div class="controls">
             <div class="control-group">
                 <label for="grid-size">Grid Size:</label>
-                <input type="number" id="grid-size" min="5" max="30" value="10">
+                <input type="number" id="grid-size" min="5" max="50" value="10">
                 <button id="apply-grid-size-btn">Apply Size</button>
             </div>
             
@@ -43,6 +43,14 @@
                     <option value="custom">Custom</option>
                 </select>
             </div>
+            
+            <div class="control-group">
+                <label for="algorithm-select">Pathfinding:</label>
+                <select id="algorithm-select">
+                    <option value="astar">A* Algorithm</option>
+                    <option value="bfs">BFS Algorithm</option>
+                </select>
+            </div>
         </div>
         
         <div class="action-buttons">
@@ -57,7 +65,7 @@
         
         <div class="main-container">
             <div class="simulation-container">
-                <div class="grid-container" id="grid-container"></div>
+                <div class="grid-container" id="grid-container" ontouchmove="event.preventDefault()"></div>
                 
                 <div class="stats-container">
                     <div class="stat">
@@ -80,6 +88,10 @@
                         <span class="stat-label">Current Mode:</span>
                         <span class="stat-value" id="current-mode">Wall</span>
                     </div>
+                    <div class="stat">
+                        <span class="stat-label">Algorithm:</span>
+                        <span class="stat-value" id="current-algorithm">A*</span>
+                    </div>
                 </div>
             </div>
             
@@ -91,6 +103,7 @@
     </div>
     
     <script src="astar.js"></script>
+    <script src="bfs.js"></script>
     <script src="assignmentAlgorithm.js"></script>
     <script src="deadlockHandler.js"></script>
     <script src="main.js"></script>

@@ -57,6 +57,7 @@ let generationMode = GEN_MANUAL;
 let failedDeadlockResolutionAttempts = 0; // Track failed deadlock resolution attempts
 let sequentialMovementMode = false; // Flag for sequential movement mode
 let sequentialMovesRemaining = 0; // Counter for sequential moves
+let currentAlgorithm = 'astar'; // Algorithm selection: 'astar' or 'bfs'
 
 // DOM elements
 const gridContainer = document.getElementById('grid-container');
@@ -65,6 +66,7 @@ const applyGridSizeBtn = document.getElementById('apply-grid-size-btn');
 const interactionModeSelect = document.getElementById('interaction-mode');
 const generationModeSelect = document.getElementById('generation-mode');
 const targetShapeSelect = document.getElementById('target-shape');
+const algorithmSelect = document.getElementById('algorithm-select');
 const initializeBtn = document.getElementById('initialize-btn');
 const startBtn = document.getElementById('start-btn');
 const resetBtn = document.getElementById('reset-btn');
@@ -77,6 +79,7 @@ const deadlocksResolvedDisplay = document.getElementById('deadlocks-resolved');
 const agentsCountDisplay = document.getElementById('agents-count');
 const targetsCountDisplay = document.getElementById('targets-count');
 const currentModeDisplay = document.getElementById('current-mode');
+const currentAlgorithmDisplay = document.getElementById('current-algorithm');
 const logConsole = document.getElementById('log-console');
 
 // Event listeners
@@ -91,6 +94,7 @@ clearLogBtn.addEventListener('click', clearLog);
 interactionModeSelect.addEventListener('change', changeInteractionMode);
 generationModeSelect.addEventListener('change', changeGenerationMode);
 targetShapeSelect.addEventListener('change', handleTargetShapeChange);
+algorithmSelect.addEventListener('change', changeAlgorithm);
 
 /**
  * Log a message to the console with optional type (info, warn, error, success)
@@ -723,7 +727,30 @@ function assignTargets() {
 }
 
 /**
- * Calculate path for an agent using A* algorithm
+ * Change the pathfinding algorithm
+ */
+function changeAlgorithm() {
+    currentAlgorithm = algorithmSelect.value;
+    let algorithmName = currentAlgorithm === 'astar' ? 'A*' : 'BFS';
+    currentAlgorithmDisplay.textContent = algorithmName;
+    log(`Pathfinding algorithm changed to: ${algorithmName}`, 'info');
+}
+
+/**
+ * Create a pathfinding algorithm instance
+ * @param {Array} gridData - The grid data for pathfinding
+ * @returns {Object} - An instance of the selected pathfinding algorithm
+ */
+function createPathfinder(gridData) {
+    if (currentAlgorithm === 'bfs') {
+        return new BFS(gridData);
+    } else {
+        return new AStar(gridData);
+    }
+}
+
+/**
+ * Calculate path for an agent using the selected algorithm
  */
 function calculatePath(agent) {
     try {
@@ -755,9 +782,9 @@ function calculatePath(agent) {
             }
         });
         
-        const astar = new AStar(gridCopy);
+        const pathfinder = createPathfinder(gridCopy);
         
-        const path = astar.findPath(
+        const path = pathfinder.findPath(
             { x: agent.x, y: agent.y },
             { x: agent.targetX, y: agent.targetY }
         );
@@ -804,8 +831,8 @@ function findPathIgnoringAgents(agent) {
             }
         }
         
-        const astar = new AStar(clearedGrid);
-        const path = astar.findPath(
+        const pathfinder = createPathfinder(clearedGrid);
+        const path = pathfinder.findPath(
             { x: agent.x, y: agent.y },
             { x: agent.targetX, y: agent.targetY }
         );
@@ -893,8 +920,8 @@ function findTemporaryTarget(agent) {
             }
         }
         
-        const astar = new AStar(clearedGrid);
-        const retreatPath = astar.findPath(
+        const pathfinder = createPathfinder(clearedGrid);
+        const retreatPath = pathfinder.findPath(
             { x: agent.x, y: agent.y },
             { x: retreat.x, y: retreat.y }
         );
@@ -1010,8 +1037,8 @@ function tryTargetReassignment() {
                     }
                 }
                 
-                const astar = new AStar(clearedGrid);
-                const path = astar.findPath(
+                const pathfinder = createPathfinder(clearedGrid);
+                const path = pathfinder.findPath(
                     { x: agent.x, y: agent.y },
                     { x: target.x, y: target.y }
                 );
@@ -1037,8 +1064,8 @@ function tryTargetReassignment() {
                         if (blockingAgent.id === agent.id) continue; // Skip the agent we're moving
                         
                         // Can this blocking agent reach the newly vacated target?
-                        const blockingAstar = new AStar(testGrid);
-                        const blockingPath = blockingAstar.findPath(
+                        const blockingPathfinder = createPathfinder(testGrid);
+                        const blockingPath = blockingPathfinder.findPath(
                             { x: blockingAgent.x, y: blockingAgent.y },
                             { x: agent.targetX, y: agent.targetY }
                         );
@@ -1052,8 +1079,8 @@ function tryTargetReassignment() {
                             
                             for (const blockedAgent of blockingInfo.blocking) {
                                 // Can this blocked agent now reach its target?
-                                const blockedAstar = new AStar(testGrid);
-                                const blockedPath = blockedAstar.findPath(
+                                const blockedPathfinder = createPathfinder(testGrid);
+                                const blockedPath = blockedPathfinder.findPath(
                                     { x: blockedAgent.x, y: blockedAgent.y },
                                     { x: blockedAgent.targetX, y: blockedAgent.targetY }
                                 );
@@ -1075,8 +1102,8 @@ function tryTargetReassignment() {
                     if (!helpsBlockedAgent) {
                         for (const blockedAgent of agentsNotAtTarget) {
                             // Can this blocked agent now reach its target?
-                            const blockedAstar = new AStar(testGrid);
-                            const blockedPath = blockedAstar.findPath(
+                            const blockedPathfinder = createPathfinder(testGrid);
+                            const blockedPath = blockedPathfinder.findPath(
                                 { x: blockedAgent.x, y: blockedAgent.y },
                                 { x: blockedAgent.targetX, y: blockedAgent.targetY }
                             );
@@ -1127,7 +1154,7 @@ function tryTargetReassignment() {
         for (const blockingInfo of blockingAgentsAtTargets) {
             const agent = blockingInfo.agent;
             
-            log(`Trying to move agent ${agent.id} which is blocking ${blockingInfo.blockCount} other agents`, 'info');
+            log(`Trying to move blocking agent ${agent.id} which is blocking ${blockingInfo.blockCount} other agents`, 'info');
             
             // Try each empty target, sorting them by distance to agent for efficiency
             const sortedTargets = [...emptyTargets].sort((a, b) => {
@@ -1158,8 +1185,8 @@ function tryTargetReassignment() {
                     }
                 }
                 
-                const astar = new AStar(clearedGrid);
-                const path = astar.findPath(
+                const pathfinder = createPathfinder(clearedGrid);
+                const path = pathfinder.findPath(
                     { x: agent.x, y: agent.y },
                     { x: target.x, y: target.y }
                 );
@@ -1214,8 +1241,8 @@ function tryTargetReassignment() {
                 }
             }
             
-            const astar = new AStar(clearedGrid);
-            const path = astar.findPath(
+            const pathfinder = createPathfinder(clearedGrid);
+            const path = pathfinder.findPath(
                 { x: blockedAgent.x, y: blockedAgent.y },
                 { x: target.x, y: target.y }
             );
@@ -1261,8 +1288,8 @@ function tryTargetReassignment() {
                     }
                 }
                 
-                const astar1 = new AStar(clearedGrid1);
-                const pathForBlocked = astar1.findPath(
+                const pathfinder1 = createPathfinder(clearedGrid1);
+                const pathForBlocked = pathfinder1.findPath(
                     { x: blockedAgent.x, y: blockedAgent.y },
                     { x: agentAtTarget.targetX, y: agentAtTarget.targetY }
                 );
@@ -1285,8 +1312,8 @@ function tryTargetReassignment() {
                     }
                 }
                 
-                const astar2 = new AStar(clearedGrid2);
-                const pathForAgentAtTarget = astar2.findPath(
+                const pathfinder2 = createPathfinder(clearedGrid2);
+                const pathForAgentAtTarget = pathfinder2.findPath(
                     { x: agentAtTarget.x, y: agentAtTarget.y },
                     { x: blockedAgent.targetX, y: blockedAgent.targetY }
                 );
@@ -1338,8 +1365,8 @@ function tryTargetReassignment() {
                     }
                 }
                 
-                const astar1 = new AStar(clearedGrid1);
-                const pathForAgent1 = astar1.findPath(
+                const pathfinder1 = createPathfinder(clearedGrid1);
+                const pathForAgent1 = pathfinder1.findPath(
                     { x: agent1.x, y: agent1.y },
                     { x: agent2.targetX, y: agent2.targetY }
                 );
@@ -1362,8 +1389,8 @@ function tryTargetReassignment() {
                     }
                 }
                 
-                const astar2 = new AStar(clearedGrid2);
-                const pathForAgent2 = astar2.findPath(
+                const pathfinder2 = createPathfinder(clearedGrid2);
+                const pathForAgent2 = pathfinder2.findPath(
                     { x: agent2.x, y: agent2.y },
                     { x: agent1.targetX, y: agent1.targetY }
                 );
@@ -1750,8 +1777,8 @@ function findTwoPhasePathThroughAgents(agent) {
         }
         
         // Phase 1: Find path to intermediate position
-        const astar1 = new AStar(phaseOneGrid);
-        const pathToIntermediate = astar1.findPath(
+        const pathfinder1 = createPathfinder(phaseOneGrid);
+        const pathToIntermediate = pathfinder1.findPath(
             { x: agent.x, y: agent.y },
             { x: intermediate.x, y: intermediate.y }
         );
@@ -1768,8 +1795,8 @@ function findTwoPhasePathThroughAgents(agent) {
                 }
             }
             
-            const astar2 = new AStar(phaseTwoGrid);
-            const pathToTarget = astar2.findPath(
+            const pathfinder2 = createPathfinder(phaseTwoGrid);
+            const pathToTarget = pathfinder2.findPath(
                 { x: intermediate.x, y: intermediate.y },
                 { x: agent.targetX, y: agent.targetY }
             );
@@ -2108,7 +2135,105 @@ function simulationStep() {
 
 // Initialize grid on page load
 window.addEventListener('load', () => {
-     log('Programmable Matter Simulation loaded', 'info');
-     changeInteractionMode(); // Set initial mode display
-     initializeGrid();
-});
+    log('Programmable Matter Simulation loaded', 'info');
+    changeInteractionMode(); // Set initial mode display
+    initializeGrid();
+    
+    // Prevent browser zoom during interactions with the grid
+    preventBrowserZoom();
+}); 
+
+/**
+ * Prevent browser zoom during interactions with the grid
+ */
+function preventBrowserZoom() {
+    // Prevent zooming on the grid container
+    gridContainer.addEventListener('wheel', function(event) {
+        if (event.ctrlKey) {
+            event.preventDefault(); // Prevent Ctrl+Wheel zoom
+        }
+    }, { passive: false });
+    
+    // Also try to find grid container with class if there's a mismatch
+    const gridContainerByClass = document.querySelector('.grid-container');
+    if (gridContainerByClass && gridContainerByClass !== gridContainer) {
+        gridContainerByClass.addEventListener('wheel', function(event) {
+            if (event.ctrlKey) {
+                event.preventDefault(); // Prevent Ctrl+Wheel zoom
+            }
+        }, { passive: false });
+    }
+    
+    // Prevent zoom on the entire document
+    document.addEventListener('wheel', function(event) {
+        if (event.ctrlKey) {
+            event.preventDefault(); // Prevent Ctrl+Wheel zoom
+        }
+    }, { passive: false });
+    
+    // Prevent keyboard zoom shortcuts (Ctrl +/-)
+    document.addEventListener('keydown', function(event) {
+        // Check for common zoom keyboard shortcuts
+        if (event.ctrlKey && (event.key === '+' || event.key === '-' || event.key === '=' || event.key === '_' || event.wheelDelta)) {
+            event.preventDefault(); // Prevent zoom
+            return false;
+        }
+    }, { passive: false });
+    
+    // Prevent pinch-to-zoom on touch devices
+    document.addEventListener('touchmove', function(event) {
+        if (event.touches.length > 1) {
+            event.preventDefault(); // Prevent pinch zoom
+        }
+    }, { passive: false });
+    
+    // Prevent double-tap zoom
+    let lastTouchTime = 0;
+    document.addEventListener('touchend', function(event) {
+        const currentTime = new Date().getTime();
+        const tapLength = currentTime - lastTouchTime;
+        
+        if (tapLength < 300 && tapLength > 0) {
+            event.preventDefault(); // Prevent double-tap zoom
+        }
+        
+        lastTouchTime = currentTime;
+    }, false);
+    
+    // Add meta viewport tag if it doesn't exist
+    if (!document.querySelector('meta[name="viewport"]')) {
+        const metaTag = document.createElement('meta');
+        metaTag.name = 'viewport';
+        metaTag.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+        document.getElementsByTagName('head')[0].appendChild(metaTag);
+    } else {
+        // Update existing viewport meta tag
+        const viewportMeta = document.querySelector('meta[name="viewport"]');
+        viewportMeta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+    }
+    
+    // Add a CSS style to prevent zoom
+    const style = document.createElement('style');
+    style.textContent = `
+        html, body {
+            touch-action: manipulation;
+            -ms-touch-action: manipulation;
+            overflow: hidden;
+            overscroll-behavior: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        #grid-container, .grid-container {
+            touch-action: none;
+            -ms-touch-action: none;
+        }
+    `;
+    document.head.appendChild(style);
+    
+    // Fix for iOS Safari
+    document.addEventListener('gesturestart', function(event) {
+        event.preventDefault(); // Prevent iOS pinch zoom
+    }, { passive: false });
+    
+    log('Browser zoom prevention enabled', 'info');
+}

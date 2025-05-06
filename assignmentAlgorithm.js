@@ -31,14 +31,15 @@ class HungarianAlgorithm {
      * @returns {Array} - 2D cost matrix
      */
     static createCostMatrix(agents, targets, grid) {
-        const astar = new AStar(grid);
+        // Use the selected pathfinding algorithm
+        const pathfinder = createPathfinder(grid);
         const costMatrix = [];
         
         for (let i = 0; i < agents.length; i++) {
             const row = [];
             for (let j = 0; j < targets.length; j++) {
-                // Calculate path length using A* algorithm
-                const path = astar.findPath(agents[i], targets[j]);
+                // Calculate path length using selected algorithm
+                const path = pathfinder.findPath(agents[i], targets[j]);
                 // Cost is the path length (or Manhattan distance if no path found)
                 const cost = path.length > 0 
                     ? path.length - 1  // Subtract 1 to exclude starting position
