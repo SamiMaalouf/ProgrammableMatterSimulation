@@ -768,7 +768,9 @@ function resetSimulation() {
     
     // Reset UI
     totalMovesDisplay.textContent = '0';
-    deadlocksResolvedDisplay.textContent = '0';
+    if (deadlocksResolvedDisplay) {
+        deadlocksResolvedDisplay.textContent = '0';
+    }
     agentsCountDisplay.textContent = '0';
     targetsCountDisplay.textContent = '0';
     startBtn.textContent = 'Start Simulation';
@@ -2310,7 +2312,9 @@ function simulationStep() {
             
             // Apply deadlock resolution strategies
             deadlockHandler.resolveDeadlocks(deadlockedAgents);
-            deadlocksResolvedDisplay.textContent = deadlockHandler.getDeadlockCount();
+            if (deadlocksResolvedDisplay) {
+                deadlocksResolvedDisplay.textContent = deadlockHandler.getDeadlockCount();
+            }
         } else {
             // No deadlocks, reset tracking
             lastDeadlockSignature = "";
