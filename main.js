@@ -927,121 +927,303 @@ function tryTargetReassignment() {
         agent.x === agent.targetX && agent.y === agent.targetY
     );
     
-    // Find empty targets (targets not assigned to any agent)
-    const emptyTargets = [];
+    // Find empty targets (targets not occupied by any agent)
+    const emptyTargets = targetPositions.filter(pos => 
+        !agents.some(a => a.x === pos.x && a.y === pos.y)
+    );
     
-    // Consider all possible target reassignments
+    log(`Found ${emptyTargets.length} empty targets available for reassignment`, 'info');
+    
+    // Track which agents have been tried to avoid infinite loops
+    const triedAgents = new Set();
+    
+    // First strategy: Try moving agents at targets to empty targets
     for (const agent of agentsAtTarget) {
-        // First try to move a blocking agent to another target
-        const otherTargets = targetPositions.filter(pos => 
-            !(pos.x === agent.x && pos.y === agent.y) && // Not this agent's current target
-            !agents.some(a => a.x === pos.x && a.y === pos.y) // Not occupied by another agent
+        // Skip if we've already tried this agent
+        if (triedAgents.has(agent.id)) continue;
+        triedAgents.add(agent.id);
+        
+        // Check if reassigning this agent could help
+        const isBlockingOthers = agentsNotAtTarget.some(blockedAgent => 
+            blockedAgent.path && blockedAgent.path.some(pos => 
+                pos.x === agent.x && pos.y === agent.y
+            )
         );
         
-        if (otherTargets.length > 0) {
-            // Try each other target to see if it improves the situation
-            for (const target of otherTargets) {
-                // Check if the new target position is reachable
-                const clearedGrid = [];
-                for (let y = 0; y < grid.length; y++) {
-                    clearedGrid.push([]);
-                    for (let x = 0; x < grid[y].length; x++) {
-                        // Only keep walls and other agents at targets
-                        if (grid[y][x] === CELL_WALL) {
-                            clearedGrid[y][x] = CELL_WALL;
-                        } else {
-                            // Mark as empty unless it's another agent at target
-                            const agentAtPos = agents.find(a => 
-                                a.id !== agent.id && a.x === x && a.y === y && 
-                                a.x === a.targetX && a.y === a.targetY
-                            );
-                            clearedGrid[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
-                        }
-                    }
-                }
-                
-                // Check if this target is reachable for the agent
-                const astar = new AStar(clearedGrid);
-                const path = astar.findPath(
-                    { x: agent.x, y: agent.y },
-                    { x: target.x, y: target.y }
-                );
-                
-                if (path.length > 1) {
-                    // This target is reachable, reassign it
-                    log(`Reassigning agent ${agent.id} from target (${agent.targetX}, ${agent.targetY}) to target (${target.x}, ${target.y})`, 'success');
-                    
-                    // Update agent's target
-                    agent.targetX = target.x;
-                    agent.targetY = target.y;
-                    agent.path = path;
-                    
-                    // Now check if other agents can find paths to their targets
-                    for (const blockedAgent of agentsNotAtTarget) {
-                        calculatePath(blockedAgent);
-                    }
-                    
-                    return true;
-                }
-            }
-        }
-    }
-    
-    // If moving agents at targets doesn't work, try reassigning a blocked agent to another target
-    for (const blockedAgent of agentsNotAtTarget) {
-        const otherTargets = targetPositions.filter(pos => 
-            !(pos.x === blockedAgent.targetX && pos.y === blockedAgent.targetY) && // Not this agent's current target
-            !agents.some(a => a.x === pos.x && a.y === pos.y) // Not occupied by another agent
-        );
+        // Prioritize agents that are blocking others
+        if (!isBlockingOthers) continue;
         
-        if (otherTargets.length > 0) {
-            // Find the closest alternative target
-            otherTargets.sort((a, b) => {
-                const distA = Math.abs(blockedAgent.x - a.x) + Math.abs(blockedAgent.y - a.y);
-                const distB = Math.abs(blockedAgent.x - b.x) + Math.abs(blockedAgent.y - b.y);
-                return distA - distB;
-            });
+        log(`Agent ${agent.id} at target (${agent.x}, ${agent.y}) is blocking other agents, trying to reassign`, 'info');
+        
+        // Try each empty target
+        for (const target of emptyTargets) {
+            // Skip if this is already the agent's target
+            if (target.x === agent.targetX && target.y === agent.targetY) continue;
             
-            // Try to find a path to the closest alternative target
-            for (const target of otherTargets) {
-                const clearedGrid = [];
+            // Check if there's a path to this new target
+            const clearedGrid = [];
+            for (let y = 0; y < grid.length; y++) {
+                clearedGrid.push([]);
+                for (let x = 0; x < grid[y].length; x++) {
+                    if (grid[y][x] === CELL_WALL) {
+                        clearedGrid[y][x] = CELL_WALL;
+                    } else {
+                        // Mark other agents at targets as walls
+                        const agentAtPos = agents.find(a => 
+                            a.id !== agent.id && a.x === x && a.y === y && 
+                            a.x === a.targetX && a.y === a.targetY
+                        );
+                        clearedGrid[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
+                    }
+                }
+            }
+            
+            const astar = new AStar(clearedGrid);
+            const path = astar.findPath(
+                { x: agent.x, y: agent.y },
+                { x: target.x, y: target.y }
+            );
+            
+            if (path.length > 1) {
+                // Found a viable target reassignment
+                log(`Reassigning agent ${agent.id} from (${agent.targetX}, ${agent.targetY}) to target at (${target.x}, ${target.y})`, 'success');
+                
+                // Update the agent's target
+                agent.targetX = target.x;
+                agent.targetY = target.y;
+                agent.path = path;
+                
+                // Recalculate paths for blocked agents
+                for (const blockedAgent of agentsNotAtTarget) {
+                    calculatePath(blockedAgent);
+                }
+                
+                return true;
+            }
+        }
+    }
+    
+    // Reset tried agents for the next strategy
+    triedAgents.clear();
+    
+    // Second strategy: Try assigning blocked agents to different targets
+    for (const blockedAgent of agentsNotAtTarget) {
+        // Skip if we've already tried this agent
+        if (triedAgents.has(blockedAgent.id)) continue;
+        triedAgents.add(blockedAgent.id);
+        
+        log(`Trying to find alternative target for blocked agent ${blockedAgent.id}`, 'info');
+        
+        // Try each empty target
+        for (const target of emptyTargets) {
+            // Skip if this is already the agent's target
+            if (target.x === blockedAgent.targetX && target.y === blockedAgent.targetY) continue;
+            
+            const clearedGrid = [];
+            for (let y = 0; y < grid.length; y++) {
+                clearedGrid.push([]);
+                for (let x = 0; x < grid[y].length; x++) {
+                    if (grid[y][x] === CELL_WALL) {
+                        clearedGrid[y][x] = CELL_WALL;
+                    } else {
+                        // Mark agents at targets as walls
+                        const agentAtPos = agents.find(a => 
+                            a.id !== blockedAgent.id && a.x === x && a.y === y && 
+                            a.x === a.targetX && a.y === a.targetY
+                        );
+                        clearedGrid[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
+                    }
+                }
+            }
+            
+            const astar = new AStar(clearedGrid);
+            const path = astar.findPath(
+                { x: blockedAgent.x, y: blockedAgent.y },
+                { x: target.x, y: target.y }
+            );
+            
+            if (path.length > 1) {
+                // Found a viable target reassignment
+                log(`Reassigning blocked agent ${blockedAgent.id} from target (${blockedAgent.targetX}, ${blockedAgent.targetY}) to target at (${target.x}, ${target.y})`, 'success');
+                
+                // Update the agent's target
+                blockedAgent.targetX = target.x;
+                blockedAgent.targetY = target.y;
+                blockedAgent.path = path;
+                
+                return true;
+            }
+        }
+    }
+    
+    // Third strategy: Try swapping target assignments between agents
+    // This is for cases where there are no empty targets
+    if (emptyTargets.length === 0) {
+        log('No empty targets available, trying to swap target assignments between agents', 'info');
+        
+        // Try swapping targets between blocked agents and agents at targets
+        for (const blockedAgent of agentsNotAtTarget) {
+            for (const agentAtTarget of agentsAtTarget) {
+                // Skip if we've already tried this pair
+                const pairKey = `${blockedAgent.id}-${agentAtTarget.id}`;
+                if (triedAgents.has(pairKey)) continue;
+                triedAgents.add(pairKey);
+                
+                log(`Trying to swap targets between blocked agent ${blockedAgent.id} and agent ${agentAtTarget.id} at target`, 'info');
+                
+                // Check if the blocked agent can reach the target of the agent at target
+                const clearedGrid1 = [];
                 for (let y = 0; y < grid.length; y++) {
-                    clearedGrid.push([]);
+                    clearedGrid1.push([]);
                     for (let x = 0; x < grid[y].length; x++) {
-                        // Only keep walls and agents at targets
                         if (grid[y][x] === CELL_WALL) {
-                            clearedGrid[y][x] = CELL_WALL;
+                            clearedGrid1[y][x] = CELL_WALL;
                         } else {
+                            // Mark other agents at targets as walls (except the one we're swapping with)
                             const agentAtPos = agents.find(a => 
-                                a.id !== blockedAgent.id && a.x === x && a.y === y &&
+                                a.id !== blockedAgent.id && a.id !== agentAtTarget.id && a.x === x && a.y === y && 
                                 a.x === a.targetX && a.y === a.targetY
                             );
-                            clearedGrid[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
+                            clearedGrid1[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
                         }
                     }
                 }
                 
-                const astar = new AStar(clearedGrid);
-                const path = astar.findPath(
+                const astar1 = new AStar(clearedGrid1);
+                const pathForBlocked = astar1.findPath(
                     { x: blockedAgent.x, y: blockedAgent.y },
-                    { x: target.x, y: target.y }
+                    { x: agentAtTarget.targetX, y: agentAtTarget.targetY }
                 );
                 
-                if (path.length > 1) {
-                    // This target is reachable, reassign it
-                    log(`Reassigning blocked agent ${blockedAgent.id} from target (${blockedAgent.targetX}, ${blockedAgent.targetY}) to target (${target.x}, ${target.y})`, 'success');
+                // Check if the agent at target can reach the blocked agent's target
+                const clearedGrid2 = [];
+                for (let y = 0; y < grid.length; y++) {
+                    clearedGrid2.push([]);
+                    for (let x = 0; x < grid[y].length; x++) {
+                        if (grid[y][x] === CELL_WALL) {
+                            clearedGrid2[y][x] = CELL_WALL;
+                        } else {
+                            // Mark other agents at targets as walls (except the one we're swapping with)
+                            const agentAtPos = agents.find(a => 
+                                a.id !== blockedAgent.id && a.id !== agentAtTarget.id && a.x === x && a.y === y && 
+                                a.x === a.targetX && a.y === a.targetY
+                            );
+                            clearedGrid2[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
+                        }
+                    }
+                }
+                
+                const astar2 = new AStar(clearedGrid2);
+                const pathForAgentAtTarget = astar2.findPath(
+                    { x: agentAtTarget.x, y: agentAtTarget.y },
+                    { x: blockedAgent.targetX, y: blockedAgent.targetY }
+                );
+                
+                // If both agents can reach each other's targets, swap them
+                if (pathForBlocked.length > 1 && pathForAgentAtTarget.length > 1) {
+                    log(`Swapping target assignments: agent ${blockedAgent.id} → (${agentAtTarget.targetX}, ${agentAtTarget.targetY}), agent ${agentAtTarget.id} → (${blockedAgent.targetX}, ${blockedAgent.targetY})`, 'success');
                     
-                    // Update agent's target
-                    blockedAgent.targetX = target.x;
-                    blockedAgent.targetY = target.y;
-                    blockedAgent.path = path;
+                    // Swap target assignments
+                    const tempX = blockedAgent.targetX;
+                    const tempY = blockedAgent.targetY;
+                    
+                    blockedAgent.targetX = agentAtTarget.targetX;
+                    blockedAgent.targetY = agentAtTarget.targetY;
+                    blockedAgent.path = pathForBlocked;
+                    
+                    agentAtTarget.targetX = tempX;
+                    agentAtTarget.targetY = tempY;
+                    agentAtTarget.path = pathForAgentAtTarget;
+                    
+                    return true;
+                }
+            }
+        }
+        
+        // Try swapping targets between blocked agents
+        for (let i = 0; i < agentsNotAtTarget.length - 1; i++) {
+            for (let j = i + 1; j < agentsNotAtTarget.length; j++) {
+                const agent1 = agentsNotAtTarget[i];
+                const agent2 = agentsNotAtTarget[j];
+                
+                // Skip if we've already tried this pair
+                const pairKey = `${agent1.id}-${agent2.id}`;
+                if (triedAgents.has(pairKey)) continue;
+                triedAgents.add(pairKey);
+                
+                log(`Trying to swap targets between blocked agents ${agent1.id} and ${agent2.id}`, 'info');
+                
+                // Check if agent1 can reach agent2's target
+                const clearedGrid1 = [];
+                for (let y = 0; y < grid.length; y++) {
+                    clearedGrid1.push([]);
+                    for (let x = 0; x < grid[y].length; x++) {
+                        if (grid[y][x] === CELL_WALL) {
+                            clearedGrid1[y][x] = CELL_WALL;
+                        } else {
+                            // Mark agents at targets as walls
+                            const agentAtPos = agents.find(a => 
+                                a.id !== agent1.id && a.id !== agent2.id && a.x === x && a.y === y && 
+                                a.x === a.targetX && a.y === a.targetY
+                            );
+                            clearedGrid1[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
+                        }
+                    }
+                }
+                
+                const astar1 = new AStar(clearedGrid1);
+                const pathForAgent1 = astar1.findPath(
+                    { x: agent1.x, y: agent1.y },
+                    { x: agent2.targetX, y: agent2.targetY }
+                );
+                
+                // Check if agent2 can reach agent1's target
+                const clearedGrid2 = [];
+                for (let y = 0; y < grid.length; y++) {
+                    clearedGrid2.push([]);
+                    for (let x = 0; x < grid[y].length; x++) {
+                        if (grid[y][x] === CELL_WALL) {
+                            clearedGrid2[y][x] = CELL_WALL;
+                        } else {
+                            // Mark agents at targets as walls
+                            const agentAtPos = agents.find(a => 
+                                a.id !== agent1.id && a.id !== agent2.id && a.x === x && a.y === y && 
+                                a.x === a.targetX && a.y === a.targetY
+                            );
+                            clearedGrid2[y][x] = agentAtPos ? CELL_WALL : CELL_EMPTY;
+                        }
+                    }
+                }
+                
+                const astar2 = new AStar(clearedGrid2);
+                const pathForAgent2 = astar2.findPath(
+                    { x: agent2.x, y: agent2.y },
+                    { x: agent1.targetX, y: agent1.targetY }
+                );
+                
+                // If both agents can reach each other's targets, swap them
+                if (pathForAgent1.length > 1 && pathForAgent2.length > 1) {
+                    log(`Swapping target assignments: agent ${agent1.id} → (${agent2.targetX}, ${agent2.targetY}), agent ${agent2.id} → (${agent1.targetX}, ${agent1.targetY})`, 'success');
+                    
+                    // Swap target assignments
+                    const tempX = agent1.targetX;
+                    const tempY = agent1.targetY;
+                    
+                    agent1.targetX = agent2.targetX;
+                    agent1.targetY = agent2.targetY;
+                    agent1.path = pathForAgent1;
+                    
+                    agent2.targetX = tempX;
+                    agent2.targetY = tempY;
+                    agent2.path = pathForAgent2;
+                    
                     return true;
                 }
             }
         }
     }
     
-    log('Could not find any viable target reassignments', 'error');
+    log('Could not find any viable target reassignments after trying all combinations', 'error');
     return false;
 }
 
@@ -1172,24 +1354,72 @@ function tryMoveBlockingAgents() {
     // Find all agents not at their targets
     const agentsNotAtTargets = agents.filter(a => a.x !== a.targetX || a.y !== a.targetY);
     
-    // Check if any agent at target is blocking a path for agents not at targets
-    for (const targetAgent of agentsAtTargets) {
-        // Check if this agent's position is in the path of any agent not at target
-        const isBlocking = agentsNotAtTargets.some(a => 
-            a.path && a.path.length > 1 && 
-            a.path.some(pos => pos.x === targetAgent.x && pos.y === targetAgent.y)
+    // Track which agents we've already tried to move
+    const triedAgents = new Set();
+    
+    // Try each blocked agent, looking for agents at targets blocking their path
+    for (const blockedAgent of agentsNotAtTargets) {
+        // Skip agents that have no path
+        if (!blockedAgent.path || blockedAgent.path.length <= 1) continue;
+        
+        // Find all agents at targets that are in this agent's path
+        const blockingAgents = agentsAtTargets.filter(targetAgent => 
+            !triedAgents.has(targetAgent.id) && // Skip agents we've already tried
+            blockedAgent.path.some(pos => pos.x === targetAgent.x && pos.y === targetAgent.y)
         );
         
-        if (isBlocking) {
-            log(`Agent ${targetAgent.id} at target (${targetAgent.x}, ${targetAgent.y}) is blocking other agents' paths`, 'warn');
+        if (blockingAgents.length > 0) {
+            log(`Agent ${blockedAgent.id} is blocked by ${blockingAgents.length} agents at their targets`, 'info');
             
-            // Try to move this agent temporarily
+            // Try moving each blocking agent in turn
+            for (const blockingAgent of blockingAgents) {
+                triedAgents.add(blockingAgent.id); // Mark as tried
+                
+                log(`Attempting to move blocking agent ${blockingAgent.id} at target (${blockingAgent.x}, ${blockingAgent.y})`, 'warn');
+                
+                if (moveAgentTemporarilyForced(blockingAgent)) {
+                    // Successfully moved this agent
+                    log(`Successfully moved blocking agent ${blockingAgent.id} from its target`, 'success');
+                    
+                    // Recalculate paths for all agents not at targets
+                    agentsNotAtTargets.forEach(agent => calculatePath(agent));
+                    anyAgentMoved = true;
+                    return true; // Return immediately after successfully moving one agent
+                }
+            }
+        }
+    }
+    
+    // If no agent was moved by the first strategy, try a more aggressive approach
+    // Instead of looking at paths, just try moving any agent at a target
+    if (!anyAgentMoved) {
+        log('First approach failed. Trying to move any agent at target...', 'warn');
+        
+        // Sort agents at targets by most recently reached
+        // This helps to prioritize moving agents that have just reached their targets
+        const sortedAgentsAtTargets = [...agentsAtTargets].sort((a, b) => {
+            // Agents with higher IDs likely reached targets more recently in many cases
+            return b.id - a.id;
+        });
+        
+        // Try each agent at target that we haven't tried yet
+        for (const targetAgent of sortedAgentsAtTargets) {
+            if (triedAgents.has(targetAgent.id)) continue;
+            triedAgents.add(targetAgent.id);
+            
+            log(`Trying to move agent ${targetAgent.id} from its target at (${targetAgent.x}, ${targetAgent.y})`, 'info');
+            
             if (moveAgentTemporarilyForced(targetAgent)) {
                 // Recalculate paths for all agents not at targets
                 agentsNotAtTargets.forEach(agent => calculatePath(agent));
                 anyAgentMoved = true;
+                return true;
             }
         }
+    }
+    
+    if (!anyAgentMoved) {
+        log('Failed to move any agent from its target to resolve deadlock', 'error');
     }
     
     return anyAgentMoved;
