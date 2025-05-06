@@ -1135,7 +1135,6 @@ function findTemporaryTarget(agent) {
 
 /**
  * Try to resolve deadlock by reassigning targets, including chain movements
- * @returns {boolean} - Whether a reassignment was successful
  */
 function tryTargetReassignment() {
     log('Attempting to resolve deadlock by reassigning targets...', 'warn');
@@ -1151,11 +1150,36 @@ function tryTargetReassignment() {
     );
     
     // Find empty targets (targets not occupied by any agent)
-    const emptyTargets = targetPositions.filter(pos => 
+    let emptyTargets = targetPositions.filter(pos => 
         !agents.some(a => a.x === pos.x && a.y === pos.y)
     );
     
     log(`Found ${emptyTargets.length} empty targets available for reassignment`, 'info');
+    
+    // In distributed mode, each agent might only be aware of a subset of empty targets
+    // based on their visibility range
+    if (currentDecisionMode === DECISION_DISTRIBUTED) {
+        // Temporarily increase visibility range for deadlock resolution
+        const tempIncreaseAmount = 2;
+        const originalVisibilityRanges = new Map();
+        
+        // Store original visibility ranges and increase them temporarily
+        agentsNotAtTarget.forEach(agent => {
+            originalVisibilityRanges.set(agent.id, agent.visibilityRange);
+            agent.visibilityRange += tempIncreaseAmount;
+            log(`Temporarily increasing agent ${agent.id} visibility to ${agent.visibilityRange} for target reassignment`, 'info');
+        });
+        
+        // Schedule restoration of original visibility ranges
+        setTimeout(() => {
+            agentsNotAtTarget.forEach(agent => {
+                if (originalVisibilityRanges.has(agent.id)) {
+                    agent.visibilityRange = originalVisibilityRanges.get(agent.id);
+                    log(`Restored agent ${agent.id} visibility to ${agent.visibilityRange}`, 'info');
+                }
+            });
+        }, simulationSpeed * 3);
+    }
     
     // PRIORITIZE: First identify agents at targets that are blocking others
     const blockingAgentsAtTargets = [];
@@ -1166,6 +1190,15 @@ function tryTargetReassignment() {
         const agentsBlocked = [];
         
         for (const blockedAgent of agentsNotAtTarget) {
+            // In distributed mode, consider visibility constraints
+            if (currentDecisionMode === DECISION_DISTRIBUTED) {
+                const distance = Math.abs(agent.x - blockedAgent.x) + Math.abs(agent.y - blockedAgent.y);
+                if (distance > blockedAgent.visibilityRange) {
+                    // This agent can't see the blocking agent
+                    continue;
+                }
+            }
+            
             if (blockedAgent.path && blockedAgent.path.some(pos => 
                 pos.x === agent.x && pos.y === agent.y
             )) {
@@ -1192,6 +1225,111 @@ function tryTargetReassignment() {
     if (blockingAgentsAtTargets.length > 0) {
         const worstBlocker = blockingAgentsAtTargets[0];
         log(`Highest priority blocker: Agent ${worstBlocker.agent.id} is blocking ${worstBlocker.blockCount} agents`, 'warn');
+    }
+
+    // In distributed mode, each agent only considers visible targets
+    if (currentDecisionMode === DECISION_DISTRIBUTED) {
+        // For each agent, filter the empty targets to only those within visibility range
+        const reassignmentAttempts = [];
+        
+        for (const agent of agentsNotAtTarget) {
+            // Get empty targets within visibility range for this agent
+            const visibleEmptyTargets = emptyTargets.filter(target => {
+                const distance = Math.abs(target.x - agent.x) + Math.abs(target.y - agent.y);
+                return distance <= agent.visibilityRange;
+            });
+            
+            if (visibleEmptyTargets.length > 0) {
+                reassignmentAttempts.push({
+                    agent: agent,
+                    targets: visibleEmptyTargets
+                });
+            }
+        }
+        
+        // Sort by number of visible targets (ascending) to prioritize agents with fewer options
+        reassignmentAttempts.sort((a, b) => a.targets.length - b.targets.length);
+        
+        // Try reassignment for each agent
+        for (const attempt of reassignmentAttempts) {
+            const agent = attempt.agent;
+            const targets = attempt.targets;
+            
+            // Try each target, prioritizing closer ones
+            const sortedTargets = [...targets].sort((a, b) => {
+                const distA = Math.abs(a.x - agent.x) + Math.abs(a.y - agent.y);
+                const distB = Math.abs(b.x - agent.x) + Math.abs(b.y - agent.y);
+                return distA - distB;
+            });
+            
+            for (const target of sortedTargets) {
+                // Skip if this target is already assigned to another agent in this round
+                if (!emptyTargets.some(t => t.x === target.x && t.y === target.y)) {
+                    continue;
+                }
+                
+                // Check if there's a path to this target
+                const clearedGrid = [];
+                for (let y = 0; y < grid.length; y++) {
+                    clearedGrid.push([]);
+                    for (let x = 0; x < grid[y].length; x++) {
+                        // Keep walls
+                        if (grid[y][x] === CELL_WALL) {
+                            clearedGrid[y][x] = CELL_WALL;
+                        } else {
+                            clearedGrid[y][x] = CELL_EMPTY;
+                        }
+                    }
+                }
+                
+                // Apply visibility constraints for path finding
+                for (let y = 0; y < clearedGrid.length; y++) {
+                    for (let x = 0; x < clearedGrid[y].length; x++) {
+                        const distance = Math.abs(x - agent.x) + Math.abs(y - agent.y);
+                        if (distance > agent.visibilityRange) {
+                            // But keep the target visible
+                            if (!(x === target.x && y === target.y)) {
+                                clearedGrid[y][x] = CELL_WALL;
+                            }
+                        }
+                    }
+                }
+                
+                // Mark visible agents as obstacles
+                agents.forEach(a => {
+                    if (a.id !== agent.id) {
+                        const distance = Math.abs(a.x - agent.x) + Math.abs(a.y - agent.y);
+                        if (distance <= agent.visibilityRange) {
+                            clearedGrid[a.y][a.x] = CELL_WALL;
+                        }
+                    }
+                });
+                
+                const pathfinder = createPathfinder(clearedGrid);
+                const path = pathfinder.findPath(
+                    { x: agent.x, y: agent.y },
+                    { x: target.x, y: target.y }
+                );
+                
+                if (path.length > 1) {
+                    // Found a viable target reassignment
+                    log(`[Distributed] Reassigning agent ${agent.id} from target (${agent.targetX}, ${agent.targetY}) to visible target at (${target.x}, ${target.y})`, 'success');
+                    
+                    // Update the agent's target
+                    agent.targetX = target.x;
+                    agent.targetY = target.y;
+                    agent.path = path;
+                    
+                    // Remove this target from empty targets
+                    emptyTargets = emptyTargets.filter(t => t.x !== target.x || t.y !== target.y);
+                    
+                    return true;
+                }
+            }
+        }
+        
+        // If distributed reassignment failed, fall back to traditional methods with increased visibility
+        log('Distributed target reassignment failed, falling back to centralized methods with increased visibility', 'warn');
     }
     
     // First strategy: Try to create chains of movements
@@ -1317,10 +1455,7 @@ function tryTargetReassignment() {
                         agent.path = path;
                         
                         // Remove this target from available targets
-                        const targetIndex = emptyTargets.findIndex(t => t.x === target.x && t.y === target.y);
-                        if (targetIndex !== -1) {
-                            emptyTargets.splice(targetIndex, 1);
-                        }
+                        emptyTargets = emptyTargets.filter(t => t.x !== target.x || t.y !== target.y);
                         
                         // Recalculate paths for all agents
                         agents.forEach(a => {
@@ -2079,6 +2214,24 @@ function simulationStep() {
                     }
                 }
                 
+                // In distributed mode, apply visibility constraints
+                if (currentDecisionMode === DECISION_DISTRIBUTED) {
+                    for (let y = 0; y < clearedGrid.length; y++) {
+                        for (let x = 0; x < clearedGrid[y].length; x++) {
+                            // For deadlock detection, temporarily increase visibility range
+                            const distance = Math.abs(x - agent.x) + Math.abs(y - agent.y);
+                            const extendedRange = agent.visibilityRange * 1.5; // Extended range for deadlock detection
+                            
+                            if (distance > extendedRange) {
+                                // But keep the target visible as a special case
+                                if (!(x === agent.targetX && y === agent.targetY)) {
+                                    clearedGrid[y][x] = CELL_WALL;
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 const pathfinder = createPathfinder(clearedGrid);
                 const path = pathfinder.findPath(
                     { x: agent.x, y: agent.y },
@@ -2164,6 +2317,20 @@ function simulationStep() {
             log(`Running in sequential mode with ${sequentialMovesRemaining} moves remaining`, 'info');
         }
         
+        // In distributed mode with sequential movement, recalculate paths more frequently
+        if (currentDecisionMode === DECISION_DISTRIBUTED && sequentialMovementMode) {
+            // Recalculate paths for agents not at their targets
+            for (const agent of prioritizedAgents) {
+                if (agent.x !== agent.targetX || agent.y !== agent.targetY) {
+                    // Recalculate path with current knowledge
+                    if (!agent.path || agent.path.length <= 1 || Math.random() < 0.2) { // 20% chance to recalculate anyway
+                        log(`[Distributed] Recalculating path for agent ${agent.id} in sequential mode`, 'info');
+                        calculatePath(agent);
+                    }
+                }
+            }
+        }
+        
         // Move each agent one step along its path
         let agentsMovedCount = 0;
         for (const agent of prioritizedAgents) {
@@ -2200,9 +2367,27 @@ function simulationStep() {
             const nextStep = agent.path[1];
             
             // Check if next step is unoccupied by other agents
-            const occupyingAgent = agents.find(a => 
-                a.id !== agent.id && a.x === nextStep.x && a.y === nextStep.y
-            );
+            let occupyingAgent = null;
+            
+            if (currentDecisionMode === DECISION_DISTRIBUTED) {
+                // In distributed mode, only detect agents within visibility range
+                occupyingAgent = agents.find(a => {
+                    if (a.id === agent.id) return false;
+                    
+                    // Check if agent is at the next step position
+                    if (a.x === nextStep.x && a.y === nextStep.y) {
+                        // Check if this agent is within visibility range
+                        const distance = Math.abs(a.x - agent.x) + Math.abs(a.y - agent.y);
+                        return distance <= agent.visibilityRange;
+                    }
+                    return false;
+                });
+            } else {
+                // In centralized mode, detect any agent
+                occupyingAgent = agents.find(a => 
+                    a.id !== agent.id && a.x === nextStep.x && a.y === nextStep.y
+                );
+            }
             
             if (!occupyingAgent) {
                 // Update grid - remove agent from current position
@@ -2240,6 +2425,17 @@ function simulationStep() {
                 if (agent.x === agent.targetX && agent.y === agent.targetY) {
                     log(`Agent ${agent.id} has reached its target at (${agent.x}, ${agent.y})`, 'success');
                     agent.path = [{ x: agent.x, y: agent.y }];
+                }
+                
+                // In distributed mode, an agent might discover new information after moving
+                // Recalculate its path with the new information
+                if (currentDecisionMode === DECISION_DISTRIBUTED && 
+                    agent.x !== agent.targetX && 
+                    agent.y !== agent.targetY &&
+                    (!sequentialMovementMode || Math.random() < 0.5)) { // 50% chance in sequential mode
+                    
+                    log(`[Distributed] Agent ${agent.id} updating path after movement with new information`, 'info');
+                    calculatePath(agent);
                 }
             } else {
                 log(`Agent ${agent.id} is waiting: next step (${nextStep.x}, ${nextStep.y}) is occupied by agent ${occupyingAgent.id}`, 'info');
@@ -2297,6 +2493,32 @@ function simulationStep() {
             // Increment the failed resolution counter
             failedDeadlockResolutionAttempts++;
             log(`Deadlock resolution attempt #${failedDeadlockResolutionAttempts}`, 'warn');
+            
+            // In distributed mode with sequential movement, increase visibility as a last resort
+            if (currentDecisionMode === DECISION_DISTRIBUTED && sequentialMovementMode) {
+                // Increase visibility range temporarily for all agents
+                log('Temporarily increasing visibility range for all agents to resolve deadlock', 'warn');
+                
+                for (const agent of agents) {
+                    if (agent.x !== agent.targetX || agent.y !== agent.targetY) {
+                        const originalVisibility = agent.visibilityRange;
+                        agent.visibilityRange += 2; // Increase visibility by 2
+                        log(`Agent ${agent.id} visibility increased from ${originalVisibility} to ${agent.visibilityRange}`, 'info');
+                        
+                        // Recalculate path with increased visibility
+                        calculatePath(agent);
+                        
+                        // Reset visibility after a few steps
+                        setTimeout(() => {
+                            agent.visibilityRange = originalVisibility;
+                            log(`Agent ${agent.id} visibility reset to ${originalVisibility}`, 'info');
+                        }, simulationSpeed * 5); // Reset after 5 steps
+                    }
+                }
+                
+                // Skip the rest of the deadlock resolution for this step
+                return;
+            }
             
             // If we've reached 5 failed attempts, pause and restart the simulation
             if (failedDeadlockResolutionAttempts >= 5) {
