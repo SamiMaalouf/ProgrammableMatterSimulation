@@ -60,6 +60,8 @@ let sequentialMovesRemaining = 0; // Counter for sequential moves
 let currentAlgorithm = 'astar'; // Algorithm selection: 'astar' or 'bfs'
 let currentTopology = TOPOLOGY_VON_NEUMANN; // Topology selection: 'vonNeumann' or 'moore'
 let simulationSpeed = 300; // Simulation speed in milliseconds (default: 300ms)
+let lastDeadlockSignature = ""; // Track the signature of the last deadlock
+let repeatedDeadlockCount = 0; // Count of repeated deadlocks
 
 // DOM elements
 const gridContainer = document.getElementById('grid-container');
@@ -609,6 +611,10 @@ function startSimulation() {
     
     // Reset the failed deadlock resolution counter
     failedDeadlockResolutionAttempts = 0;
+    
+    // Reset repeated deadlock tracking
+    lastDeadlockSignature = "";
+    repeatedDeadlockCount = 0;
     
     // Initialize sequential movement counter if in sequential mode
     if (sequentialMovementMode) {
@@ -1859,13 +1865,99 @@ function simulationStep() {
         }
         
         // Detect deadlocks
-        const deadlockedAgents = deadlockHandler.detectDeadlocks();
+        let deadlockedAgents = deadlockHandler.detectDeadlocks();
+        
+        // In sequential mode, validate deadlocks more carefully
+        if (sequentialMovementMode && deadlockedAgents.length > 0) {
+            // Filter out agents that still have valid paths
+            const trueDeadlockedAgents = deadlockedAgents.filter(agentId => {
+                const agent = agents.find(a => a.id === agentId);
+                if (!agent) return false;
+                
+                // Check if the agent has a valid path
+                if (agent.path && agent.path.length > 1) {
+                    // Check next step - if it's blocked by another agent, that's not a true deadlock
+                    // in sequential mode, just waiting for turn
+                    const nextStep = agent.path[1];
+                    const isBlocked = agents.some(a => a.id !== agent.id && a.x === nextStep.x && a.y === nextStep.y);
+                    
+                    if (isBlocked) {
+                        // Not a true deadlock, just waiting for other agent to move
+                        return false;
+                    }
+                }
+                
+                // Check if there's any valid path to target
+                const clearedGrid = [];
+                for (let y = 0; y < grid.length; y++) {
+                    clearedGrid.push([]);
+                    for (let x = 0; x < grid[y].length; x++) {
+                        // Only keep walls, clear everything else
+                        clearedGrid[y][x] = grid[y][x] === CELL_WALL ? CELL_WALL : CELL_EMPTY;
+                    }
+                }
+                
+                const pathfinder = createPathfinder(clearedGrid);
+                const path = pathfinder.findPath(
+                    { x: agent.x, y: agent.y },
+                    { x: agent.targetX, y: agent.targetY }
+                );
+                
+                // If no path in cleared grid, it's a true deadlock
+                return path.length <= 1;
+            });
+            
+            // Only use truly deadlocked agents
+            deadlockedAgents = trueDeadlockedAgents;
+        }
         
         // Resolve deadlocks if any
         if (deadlockedAgents.length > 0) {
-            log(`Detected ${deadlockedAgents.length} deadlocked agents: ${deadlockedAgents.join(', ')}`, 'warn');
+            log(`Detected ${deadlockedAgents.length} true deadlocks: ${deadlockedAgents.join(', ')}`, 'warn');
+            
+            // Check for repeated deadlocks in sequential mode
+            if (sequentialMovementMode && (currentAlgorithm === 'astar' || currentAlgorithm === 'bfs')) {
+                // Create a signature for this deadlock
+                const deadlockSignature = generateDeadlockSignature(deadlockedAgents);
+                
+                // Check if it's the same deadlock as the last one
+                if (deadlockSignature === lastDeadlockSignature) {
+                    repeatedDeadlockCount++;
+                    log(`Repeated deadlock detected (${repeatedDeadlockCount}/3): same agents stuck in same positions`, 'warn');
+                    
+                    // If we've seen the same deadlock 3 times, pause and restart
+                    if (repeatedDeadlockCount >= 3) {
+                        log(`Same deadlock detected 3 times in sequential mode. Automatically pausing...`, 'warn');
+                        
+                        // Pause the simulation
+                        pauseSimulation();
+                        
+                        // Reset the repeated deadlock counter
+                        repeatedDeadlockCount = 0;
+                        lastDeadlockSignature = "";
+                        
+                        // Wait a moment then restart
+                        setTimeout(() => {
+                            log(`Automatically restarting simulation after repeated deadlock...`, 'info');
+                            startSimulation();
+                        }, 500);
+                        
+                        return; // Exit this simulation step
+                    }
+                } else {
+                    // New deadlock, reset counter
+                    repeatedDeadlockCount = 1;
+                    lastDeadlockSignature = deadlockSignature;
+                }
+            }
+            
+            // Apply deadlock resolution strategies
             deadlockHandler.resolveDeadlocks(deadlockedAgents);
             deadlocksResolvedDisplay.textContent = deadlockHandler.getDeadlockCount();
+        } else {
+            // No deadlocks, reset tracking
+            lastDeadlockSignature = "";
+            repeatedDeadlockCount = 0;
         }
         
         // Prioritize agent movements based on distance to target
@@ -2318,4 +2410,23 @@ function changeSimulationSpeed() {
         clearInterval(simulationInterval);
         simulationInterval = setInterval(simulationStep, simulationSpeed);
     }
+}
+
+/**
+ * Generate a unique signature for a deadlock state
+ * @param {Array} deadlockedAgentIds - Array of deadlocked agent IDs
+ * @returns {string} - A string signature representing this deadlock state
+ */
+function generateDeadlockSignature(deadlockedAgentIds) {
+    // Sort agent IDs for consistent signature
+    const sortedIds = [...deadlockedAgentIds].sort((a, b) => a - b);
+    
+    // Create signature with agent IDs, positions, and targets
+    const signature = sortedIds.map(id => {
+        const agent = agents.find(a => a.id === id);
+        if (!agent) return `${id}:unknown`;
+        return `${id}:(${agent.x},${agent.y})->(${agent.targetX},${agent.targetY})`;
+    }).join('|');
+    
+    return signature;
 }
