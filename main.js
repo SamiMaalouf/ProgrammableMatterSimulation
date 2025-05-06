@@ -55,6 +55,8 @@ let deadlockHandler = null;
 let currentMode = MODE_WALL;
 let generationMode = GEN_MANUAL;
 let failedDeadlockResolutionAttempts = 0; // Track failed deadlock resolution attempts
+let sequentialMovementMode = false; // Flag for sequential movement mode
+let sequentialMovesRemaining = 0; // Counter for sequential moves
 
 // DOM elements
 const gridContainer = document.getElementById('grid-container');
@@ -1788,6 +1790,19 @@ function simulationStep() {
         // Update deadlock tracking
         deadlockHandler.updatePositionTracking();
         
+        // Check if all agents have reached their targets BEFORE any other processing
+        const agentsNotAtTarget = agents.filter(agent => 
+            agent.x !== agent.targetX || agent.y !== agent.targetY
+        );
+        
+        if (agentsNotAtTarget.length === 0) {
+            log('All agents have reached their targets!', 'success');
+            alert('All agents have reached their targets!');
+            pauseSimulation();
+            startBtn.textContent = 'Start Simulation';
+            return;
+        }
+        
         // Detect deadlocks
         const deadlockedAgents = deadlockHandler.detectDeadlocks();
         
@@ -1816,10 +1831,18 @@ function simulationStep() {
         });
         
         // Move each agent one step along its path
+        let agentsMovedCount = 0;
         for (const agent of prioritizedAgents) {
             // Skip if agent is already at target
             if (agent.x === agent.targetX && agent.y === agent.targetY) {
+                // Clear any remaining path for agents at targets to prevent accidental movement
+                agent.path = [{ x: agent.x, y: agent.y }];
                 continue;
+            }
+            
+            // In sequential mode, only move one agent per step
+            if (sequentialMovementMode && agentsMovedCount > 0) {
+                break;
             }
             
             // Reset retreating flag if agent has reached its temporary position
@@ -1851,7 +1874,18 @@ function simulationStep() {
                 grid[agent.y][agent.x] = CELL_EMPTY;
                 
                 // Log the move
-                log(`Moving agent ${agent.id} from (${agent.x}, ${agent.y}) to (${nextStep.x}, ${nextStep.y})`, 'info');
+                if (sequentialMovementMode) {
+                    log(`[Sequential Mode] Moving agent ${agent.id} from (${agent.x}, ${agent.y}) to (${nextStep.x}, ${nextStep.y})`, 'info');
+                    sequentialMovesRemaining--;
+                    
+                    // Check if we should exit sequential mode
+                    if (sequentialMovesRemaining <= 0) {
+                        log(`Sequential movement complete, returning to normal movement mode`, 'success');
+                        sequentialMovementMode = false;
+                    }
+                } else {
+                    log(`Moving agent ${agent.id} from (${agent.x}, ${agent.y}) to (${nextStep.x}, ${nextStep.y})`, 'info');
+                }
                 
                 // Move agent to next position
                 agent.x = nextStep.x;
@@ -1864,7 +1898,14 @@ function simulationStep() {
                 agent.path.shift();
                 
                 agentsMoved = true;
+                agentsMovedCount++;
                 totalMoves++;
+                
+                // If agent has now reached its target, clear its path to prevent further movement
+                if (agent.x === agent.targetX && agent.y === agent.targetY) {
+                    log(`Agent ${agent.id} has reached its target at (${agent.x}, ${agent.y})`, 'success');
+                    agent.path = [{ x: agent.x, y: agent.y }];
+                }
             } else {
                 log(`Agent ${agent.id} is waiting: next step (${nextStep.x}, ${nextStep.y}) is occupied by agent ${occupyingAgent.id}`, 'info');
                 
@@ -1888,18 +1929,16 @@ function simulationStep() {
         totalMovesDisplay.textContent = totalMoves;
         updateCountDisplays();
         
-        // Count how many agents have reached their target
+        // Check again if all agents have reached their targets (after movements)
         const agentsAtTarget = agents.filter(agent => 
             agent.x === agent.targetX && agent.y === agent.targetY
         ).length;
         
         log(`${agentsAtTarget} out of ${agents.length} agents are at their targets`, 'info');
         
-        // Check if all agents reached their targets
-        const allReachedTargets = agentsAtTarget === agents.length;
-        
-        if (allReachedTargets) {
-            log('All agents have reached their targets!', 'success');
+        // Second check for all agents reaching targets
+        if (agentsAtTarget === agents.length) {
+            log('All agents have reached their targets! Stopping simulation.', 'success');
             alert('All agents have reached their targets!');
             pauseSimulation();
             startBtn.textContent = 'Start Simulation';
@@ -1937,6 +1976,12 @@ function simulationStep() {
                 // Wait a moment then restart (using setTimeout to allow the UI to update)
                 setTimeout(() => {
                     log(`Automatically restarting simulation with fresh target assignments`, 'info');
+                    
+                    // Enable sequential movement mode
+                    sequentialMovementMode = true;
+                    sequentialMovesRemaining = agents.length;
+                    log(`Enabling sequential movement mode: Agents will move one at a time for ${sequentialMovesRemaining} steps`, 'info');
+                    
                     startSimulation();
                 }, 500);
                 
