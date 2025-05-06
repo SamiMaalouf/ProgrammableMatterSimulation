@@ -62,6 +62,9 @@ let currentTopology = TOPOLOGY_VON_NEUMANN; // Topology selection: 'vonNeumann' 
 let simulationSpeed = 300; // Simulation speed in milliseconds (default: 300ms)
 let lastDeadlockSignature = ""; // Track the signature of the last deadlock
 let repeatedDeadlockCount = 0; // Count of repeated deadlocks
+let isDragging = false; // Track if user is dragging mouse
+let lastDragCell = null; // Track last cell modified during drag
+let isClickHandled = false; // Prevent click after drag conflicts
 
 // DOM elements
 const gridContainer = document.getElementById('grid-container');
@@ -215,12 +218,91 @@ function initializeGrid() {
             cell.dataset.x = x;
             cell.dataset.y = y;
             
-            // Add click event for placing elements
-            cell.addEventListener('click', () => handleCellClick(x, y));
+            // Add individual click event for adding/removing elements
+            cell.addEventListener('click', (e) => {
+                // Only process click if it wasn't already handled as a drag start
+                if (!isClickHandled) {
+                    handleCellClick(x, y);
+                }
+                // Reset the flag
+                isClickHandled = false;
+            });
+            
+            // Add drag events for continuous adding of elements
+            cell.addEventListener('mousedown', (e) => {
+                if (e.button === 0) { // Left mouse button
+                    isDragging = true;
+                    handleCellClick(x, y);
+                    lastDragCell = { x, y };
+                    isClickHandled = true; // Prevent subsequent click event from firing
+                    e.preventDefault(); // Prevent text selection
+                }
+            });
+            
+            cell.addEventListener('mouseover', (e) => {
+                if (isDragging && (lastDragCell.x !== x || lastDragCell.y !== y)) {
+                    handleCellClick(x, y);
+                    lastDragCell = { x, y };
+                }
+            });
+            
+            // Add touch events for mobile
+            cell.addEventListener('touchstart', (e) => {
+                isDragging = true;
+                handleCellClick(x, y);
+                lastDragCell = { x, y };
+                isClickHandled = true; // Prevent subsequent click event from firing
+                e.preventDefault(); // Prevent scrolling
+            });
+            
+            cell.addEventListener('touchmove', (e) => {
+                if (isDragging) {
+                    // Get touch position relative to grid
+                    const touch = e.touches[0];
+                    const gridRect = gridContainer.getBoundingClientRect();
+                    const touchX = touch.clientX - gridRect.left;
+                    const touchY = touch.clientY - gridRect.top;
+                    
+                    // Calculate cell coordinates from touch position
+                    const cellWidth = gridRect.width / gridSize;
+                    const cellHeight = gridRect.height / gridSize;
+                    const cellX = Math.floor(touchX / cellWidth);
+                    const cellY = Math.floor(touchY / cellHeight);
+                    
+                    // Make sure we're within bounds
+                    if (cellX >= 0 && cellX < gridSize && cellY >= 0 && cellY < gridSize && 
+                        (lastDragCell.x !== cellX || lastDragCell.y !== cellY)) {
+                        handleCellClick(cellX, cellY);
+                        lastDragCell = { x: cellX, y: cellY };
+                    }
+                    
+                    e.preventDefault(); // Prevent scrolling
+                }
+            });
             
             gridContainer.appendChild(cell);
         }
     }
+    
+    // Add global mouse up, touch end, and click events to stop dragging
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+        setTimeout(() => {
+            isClickHandled = false; // Reset after a short delay to handle click events again
+        }, 10);
+    });
+    
+    document.addEventListener('touchend', () => {
+        isDragging = false;
+        setTimeout(() => {
+            isClickHandled = false; // Reset after a short delay to handle click events again
+        }, 10);
+    });
+    
+    // Add mouse leave event to grid container to stop dragging when mouse leaves the grid
+    gridContainer.addEventListener('mouseleave', () => {
+        isDragging = false;
+    });
     
     // Add initial agents at the bottom row if auto generation is enabled
     if (generationMode === GEN_AUTO) {
@@ -665,9 +747,15 @@ function pauseSimulation() {
 function resetSimulation() {
     pauseSimulation();
     
+    // Reset simulation state
     agents = [];
     targetPositions = [];
     totalMoves = 0;
+    
+    // Reset grid to empty
+    if (grid.length > 0) {
+        grid = createEmptyGrid(gridSize);
+    }
     
     // Reset UI
     totalMovesDisplay.textContent = '0';
@@ -677,7 +765,10 @@ function resetSimulation() {
     startBtn.textContent = 'Start Simulation';
     startBtn.disabled = true;
     
-    log('Simulation reset', 'info');
+    // Render empty grid
+    renderGrid();
+    
+    log('Simulation and grid reset', 'info');
 }
 
 /**
